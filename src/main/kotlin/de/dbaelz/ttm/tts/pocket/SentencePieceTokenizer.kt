@@ -1,4 +1,4 @@
-package de.dbaelz.ttm.tts
+package de.dbaelz.ttm.tts.pocket
 
 import com.sentencepiece.Model
 import com.sentencepiece.Scoring
@@ -11,7 +11,7 @@ import java.nio.file.Paths
 @Component
 class SentencePieceTokenizer(
     @Value("\${tts.models.pocket-tts}") private val modelsPath: String,
-    @Value("\$tts.models.pocket-tts.tokenizer") private val fileName: String
+    @Value("\${tts.models.pocket-tts.tokenizer}") private val fileName: String
 ) {
     private val tokenizer =
         Model.parseFrom(Paths.get(modelsPath).resolve(fileName))
