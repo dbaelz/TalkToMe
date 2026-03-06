@@ -1,0 +1,15 @@
+meta {
+  name: Download File
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{host}}/tts/files/{{file_id}}
+  auth: basic
+}
+
+auth:basic {
+  username: {{auth_username}}
+  password: {{auth_password}}
+}

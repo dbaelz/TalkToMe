@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Talk To Me",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

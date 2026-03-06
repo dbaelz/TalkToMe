@@ -1,0 +1,22 @@
+meta {
+  name: Generate Audio
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{host}}/tts
+  body: json
+  auth: basic
+}
+
+auth:basic {
+  username: {{auth_username}}
+  password: {{auth_password}}
+}
+
+body:json {
+  {
+    "text": "Hello there"
+  }
+}
