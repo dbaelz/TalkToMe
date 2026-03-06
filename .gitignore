@@ -32,8 +32,10 @@ out/
 /nbdist/
 /.nb-gradle/
 
-storage
 .vscode/
 .kotlin
 .plan
 
+### Project specific ###
+storage
+models
