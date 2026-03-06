@@ -25,7 +25,7 @@ class SecurityConfig {
             .csrf { it.disable() }
             .authorizeHttpRequests { auth ->
                 auth
-                    .requestMatchers("/api/notes/**").authenticated()
+                    .requestMatchers("/api/tts/**").authenticated()
                     .anyRequest().permitAll()
             }
             .httpBasic { }
