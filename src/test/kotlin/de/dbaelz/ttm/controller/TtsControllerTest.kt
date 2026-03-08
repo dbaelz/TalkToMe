@@ -2,12 +2,15 @@ package de.dbaelz.ttm.controller
 
 import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.repository.JobRepository
-import de.dbaelz.ttm.service.LocalStorageService
+import de.dbaelz.ttm.service.StorageService
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -16,6 +19,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -27,7 +31,7 @@ class TtsControllerTest @Autowired constructor(
     lateinit var jobRepository: JobRepository
 
     @Autowired
-    lateinit var storageService: LocalStorageService
+    lateinit var storageService: StorageService
 
     private val authHeader: String =
         "Basic " + Base64.getEncoder().encodeToString("user:password".toByteArray())
@@ -125,5 +129,22 @@ class TtsControllerTest @Autowired constructor(
     fun `download - unauthorized when missing credentials`() {
         mockMvc.perform(get("/api/tts/files/file1"))
             .andExpect(status().isUnauthorized)
+    }
+
+    @TestConfiguration
+    class TestConfig {
+        @Bean
+        @Primary
+        fun storageService(): StorageService = object : StorageService {
+            private val map = ConcurrentHashMap<String, ByteArray>()
+
+            override fun save(bytes: ByteArray, extension: String): String {
+                val id = UUID.randomUUID().toString()
+                map[id] = bytes
+                return id
+            }
+
+            override fun load(id: String, extension: String): ByteArray? = map[id]
+        }
     }
 }

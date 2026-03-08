@@ -10,19 +10,19 @@ import java.util.UUID
 class LocalStorageService(
     @Value("\${storage.path:storage}")
     private val basePath: String
-) {
+) : StorageService {
     init {
         Files.createDirectories(File(basePath).toPath())
     }
 
-    fun save(bytes: ByteArray, extension: String = "wav"): String {
+    override fun save(bytes: ByteArray, extension: String): String {
         val id = UUID.randomUUID().toString()
         val file = File(basePath, "${id}.$extension")
         file.writeBytes(bytes)
         return id
     }
 
-    fun load(id: String, extension: String = "wav"): ByteArray? {
+    override fun load(id: String, extension: String): ByteArray? {
         val file = File(basePath, "${id}.$extension")
         return if (file.exists()) file.readBytes() else null
     }

@@ -9,10 +9,10 @@ import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.onnx.OnnxWrapper
 import de.dbaelz.ttm.repository.JobRepository
 import de.dbaelz.ttm.service.LocalStorageService
+import de.dbaelz.ttm.service.StorageService
 import de.dbaelz.ttm.service.TtsService
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -35,7 +35,7 @@ class PocketTtsService(
     private val tokenizer: SentencePieceTokenizer,
     private val onnx: OnnxWrapper,
     private val waveformSampler: WaveformSampler,
-    private val storage: LocalStorageService,
+    private val storage: StorageService,
     private val repo: JobRepository
 ) : TtsService {
     init {
@@ -91,15 +91,12 @@ class PocketTtsService(
         }
 
         val voiceEmbeddings = computeVoiceEmbeddings(encoderModel)
+        if (voiceEmbeddings.isEmpty()) throw IllegalArgumentException("Voice embedding produced no data")
+
         val tokenIds = tokenizer.tokenize(text)
         if (tokenIds.isEmpty()) throw IllegalArgumentException("Text tokenization produced no tokens")
 
         val env = onnx.getEnvironment()
-
-        val textConditioner = textConditionerModel
-        val flowMain = lmMainModel
-        val flowFlow = lmFlowModel
-        val mimi = decoderModel
 
         val frameSize = 32
         val diffusionSteps = 10
@@ -114,19 +111,19 @@ class PocketTtsService(
         val voiceTensor = createFloatTensorFrom2D(env, voiceEmbeddings)
 
         // Init states (create according to model's declared inputs)
-        val flowState = initStateFromSession(flowMain)
-        val mimiState = initStateFromSession(mimi)
+        val flowState = initStateFromSession(lmMainModel)
+        val mimiState = initStateFromSession(decoderModel)
 
         try {
             // Voice conditioning
-            val voiceInputs = buildInputsForSession(flowMain, flowState, mapOf("sequence" to emptySeq, "text_embeddings" to voiceTensor))
-            var res = flowMain.run(voiceInputs)
-            updateStateFromResults(flowState, res, flowMain)
+            val voiceInputs = buildInputsForSession(lmMainModel, flowState, mapOf("sequence" to emptySeq, "text_embeddings" to voiceTensor))
+            var res = lmMainModel.run(voiceInputs)
+            updateStateFromResults(flowState, res, lmMainModel)
             res.close()
 
             // Text conditioning
             val tokenTensor = createLongTensor(env, tokenIds)
-            val textRes = textConditioner.run(mapOf("token_ids" to tokenTensor))
+            val textRes = textConditionerModel.run(mapOf("token_ids" to tokenTensor))
             val textEmb = textRes[0] as OnnxTensor
             // Ensure shape is [1, 1, 1024] or [1, N, 1024]
             // If necessary, wrap/reshape by recreating tensor with same data
@@ -135,9 +132,9 @@ class PocketTtsService(
             tokenTensor.close()
 
             // Run flow main with empty seq + text embeddings to update state
-            val mainInputs = buildInputsForSession(flowMain, flowState, mapOf("sequence" to emptySeq, "text_embeddings" to textEmbTensor))
-            res = flowMain.run(mainInputs)
-            updateStateFromResults(flowState, res, flowMain)
+            val mainInputs = buildInputsForSession(lmMainModel, flowState, mapOf("sequence" to emptySeq, "text_embeddings" to textEmbTensor))
+            res = lmMainModel.run(mainInputs)
+            updateStateFromResults(flowState, res, lmMainModel)
             res.close()
 
             // Autoregressive generation
@@ -148,8 +145,8 @@ class PocketTtsService(
             val rng = Random()
 
             for (step in 0 until maxFrames) {
-                val arInputs = buildInputsForSession(flowMain, flowState, mapOf("sequence" to currLatent, "text_embeddings" to emptyText))
-                val arRes = flowMain.run(arInputs)
+                val arInputs = buildInputsForSession(lmMainModel, flowState, mapOf("sequence" to currLatent, "text_embeddings" to emptyText))
+                val arRes = lmMainModel.run(arInputs)
 
                 val conditioningTensor = arRes[0] as OnnxTensor
                 val eosTensor = arRes[1] as OnnxTensor
@@ -157,7 +154,7 @@ class PocketTtsService(
                 val conditioning = extractFloatArrayFromTensor(conditioningTensor) // shape [1,1,condDim] or [1,condDim]
                 val eosVal = extractScalarFloat(eosTensor)
 
-                updateStateFromResults(flowState, arRes, flowMain)
+                updateStateFromResults(flowState, arRes, lmMainModel)
                 conditioningTensor.close()
                 eosTensor.close()
                 arRes.close()
@@ -187,7 +184,7 @@ class PocketTtsService(
                     flowInputs["t"] = tTensor
                     flowInputs["x"] = xTensor
 
-                    val flowRes = flowFlow.run(flowInputs)
+                    val flowRes = lmFlowModel.run(flowInputs)
                     val vTensor = flowRes[0] as OnnxTensor
                     val v = extractFloatArrayFromTensor1D(vTensor)
 
@@ -217,8 +214,8 @@ class PocketTtsService(
                 val chunk = generatedLatents.subList(idx, end)
                 val latentTensor = createLatentsTensor(env, chunk)
 
-                val decoderInputs = buildInputsForSession(mimi, mimiState, mapOf("latent" to latentTensor))
-                val decRes = mimi.run(decoderInputs)
+                val decoderInputs = buildInputsForSession(decoderModel, mimiState, mapOf("latent" to latentTensor))
+                val decRes = decoderModel.run(decoderInputs)
 
                 // audio out
                 val audioTensor = decRes[0] as OnnxTensor
@@ -226,7 +223,7 @@ class PocketTtsService(
                 audioFloatsList.addAll(audioOut.toList())
 
                 // update mimi state
-                updateStateFromResults(mimiState, decRes, mimi)
+                updateStateFromResults(mimiState, decRes, decoderModel)
 
                 audioTensor.close()
                 decRes.close()
