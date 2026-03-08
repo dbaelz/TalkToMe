@@ -4,8 +4,8 @@ import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtSession
 import de.dbaelz.ttm.audio.WaveformSampler
-import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.model.TtsEngine
+import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.onnx.OnnxWrapper
 import de.dbaelz.ttm.tts.TtsConfig
 import de.dbaelz.ttm.tts.TtsExecutor
@@ -17,9 +17,13 @@ import java.nio.ByteOrder
 import java.nio.LongBuffer
 import java.nio.file.Paths
 import java.util.*
+import kotlin.collections.get
+import kotlin.compareTo
 import kotlin.io.path.absolutePathString
 import kotlin.math.min
 import kotlin.math.sqrt
+import kotlin.run
+import kotlin.times
 
 @Service
 class PocketTtsExecutor(
@@ -64,7 +68,8 @@ class PocketTtsExecutor(
         val emptyText = createEmptyFloatTensor(env, longArrayOf(1L, 0L, 1024L))
 
         val numEmbeddings = voiceEmbeddings.size / VOICE_EMBEDDING_SIZE
-        val embeddingSize = if (voiceEmbeddings.isNotEmpty()) voiceEmbeddings.size / numEmbeddings else 0
+        val embeddingSize =
+            if (voiceEmbeddings.isNotEmpty()) voiceEmbeddings.size / numEmbeddings else 0
         val voiceTensor = createFloatTensorFrom1D(
             env = env,
             flatData = voiceEmbeddings,
@@ -131,8 +136,7 @@ class PocketTtsExecutor(
                 val conditioningTensor = arRes[0] as OnnxTensor
                 val eosTensor = arRes[1] as OnnxTensor
 
-                val conditioning =
-                    extractFloatArrayFromTensor(conditioningTensor) // shape [1,1,condDim] or [1,condDim]
+                val conditioning = extractFloatArrayFromTensor(conditioningTensor)
                 val eosVal = extractScalarFloat(eosTensor)
 
                 updateStateFromResults(flowState, arRes, lmMainModel)
@@ -183,7 +187,8 @@ class PocketTtsExecutor(
             }
 
             // Decode latents in chunks
-            val audioFloatsList = ArrayList<Float>()
+            var audioBuf = FloatArray(kotlin.math.max(1024, generatedLatents.size * 256))
+            var audioPos = 0
             var idx = 0
             while (idx < generatedLatents.size) {
                 val end = min(idx + DECODE_CHUNK_SIZE, generatedLatents.size)
@@ -198,10 +203,17 @@ class PocketTtsExecutor(
                     )
                 val decRes = decoderModel.run(decoderInputs)
 
-                // audio out
                 val audioTensor = decRes[0] as OnnxTensor
                 val audioOut = extractFloatArrayFromTensor(audioTensor)
-                audioFloatsList.addAll(audioOut.toList())
+                val outLen = audioOut.size
+                if (audioPos + outLen > audioBuf.size) {
+                    var newCap = kotlin.math.max(audioBuf.size * 2, audioPos + outLen)
+                    val newBuf = FloatArray(newCap)
+                    System.arraycopy(audioBuf, 0, newBuf, 0, audioPos)
+                    audioBuf = newBuf
+                }
+                System.arraycopy(audioOut, 0, audioBuf, audioPos, outLen)
+                audioPos += outLen
 
                 updateStateFromResults(decoderState, decRes, decoderModel)
 
@@ -209,8 +221,10 @@ class PocketTtsExecutor(
                 latentTensor.close()
                 idx = end
             }
+            val finalAudio = if (audioPos == audioBuf.size) audioBuf else audioBuf.copyOf(audioPos)
 
-            return waveformSampler.fromFloatArray(audioFloatsList, 24000)
+            return waveformSampler.fromFloatArray(finalAudio, 24000)
+
         } finally {
             emptySeq.close()
             emptyText.close()
@@ -339,29 +353,54 @@ class PocketTtsExecutor(
     }
 
     private fun extractFloatArrayFromTensor(tensor: OnnxTensor): FloatArray {
-        when (val v = tensor.value) {
+        return when (val v = tensor.value) {
             is java.nio.FloatBuffer -> {
                 v.rewind()
-                val a = FloatArray(v.remaining()); v.get(a); return a
+                val out = FloatArray(v.remaining())
+                v.get(out)
+                out
             }
+
+            is FloatArray -> v
 
             is Array<*> -> {
-                // try to flatten nested arrays to 1D
-                val list = ArrayList<Float>()
-                fun recurse(o: Any?) {
-                    when (o) {
-                        is Float -> list.add(o)
-                        is Number -> list.add(o.toFloat())
-                        is FloatArray -> for (x in o) list.add(x)
-                        is Array<*> -> for (x in o) recurse(x)
+                fun countElems(input: Any?): Int {
+                    return when (input) {
+                        is Float -> 1
+                        is Number -> 1
+                        is FloatArray -> input.size
+                        is Array<*> -> {
+                            var sum = 0
+                            for (it in input) sum += countElems(it)
+                            sum
+                        }
+                        else -> 0
                     }
                 }
-                recurse(v)
-                return list.toFloatArray()
+
+                val total = countElems(v)
+                if (total == 0) return FloatArray(0)
+
+                val out = FloatArray(total)
+                val idx = intArrayOf(0)
+
+                fun fill(input: Any?) {
+                    when (input) {
+                        is Float -> out[idx[0]++] = input
+                        is Number -> out[idx[0]++] = input.toFloat()
+                        is FloatArray -> {
+                            System.arraycopy(input, 0, out, idx[0], input.size)
+                            idx[0] += input.size
+                        }
+                        is Array<*> -> input.forEach { fill(it) }
+                    }
+                }
+
+                v.forEach { fill(it) }
+                out
             }
 
-            is FloatArray -> return v
-            else -> return FloatArray(0)
+            else -> FloatArray(0)
         }
     }
 
@@ -620,10 +659,12 @@ class PocketTtsExecutor(
                             }
                         }
                     }
+
                     is FloatArray -> first
                     else -> FloatArray(0)
                 }
             }
+
             is java.nio.FloatBuffer -> {
                 val buf = outVal
                 buf.rewind()
@@ -634,6 +675,7 @@ class PocketTtsExecutor(
                     buf.get(array)
                 }
             }
+
             else -> FloatArray(0)
         }
 
@@ -662,7 +704,7 @@ class PocketTtsExecutor(
         const val VOICE_EMBEDDING_SIZE = 1024
         const val FRAME_SIZE = 32L
         const val MAX_FRAMES = 500
-        const val DECODE_CHUNK_SIZE = 12
+        const val DECODE_CHUNK_SIZE = 15
         const val FRAMES_AFTER_EOS = 3
 
         private val EMPTY_BOOL_BUFFER = ByteBuffer.wrap(byteArrayOf(0)).asReadOnlyBuffer()

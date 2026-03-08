@@ -7,9 +7,7 @@ import kotlin.math.roundToInt
 
 @Component
 class WaveformSampler {
-    fun fromFloatArray(input: ArrayList<Float>, sampleRate: Int = 24000): ByteArray {
-        val audio = FloatArray(input.size) { i -> input[i] }
-
+    fun fromFloatArray(audio: FloatArray, sampleRate: Int = 24000): ByteArray {
         val byteRate = sampleRate * CHANNELS * BITS_PER_SAMPLE / 8
         val dataBytesSize = audio.size * Short.SIZE_BYTES
 
