@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.LongBuffer
 import java.nio.file.Paths
 import java.util.*
 import kotlin.io.path.absolutePathString
@@ -58,13 +59,8 @@ class PocketTtsExecutor(
 
         val env = onnx.getEnvironment()
 
-        val frameSize = 32
-        val framesAfterEos = 3
-        val maxFrames = 500
-        val decodeChunkSize = 12
-
         // Prepare tensors used repeatedly
-        val emptySeq = createEmptyFloatTensor(env, longArrayOf(1L, 0L, frameSize.toLong()))
+        val emptySeq = createEmptyFloatTensor(env, longArrayOf(1L, 0L, FRAME_SIZE))
         val emptyText = createEmptyFloatTensor(env, longArrayOf(1L, 0L, 1024L))
         val voiceTensor = createFloatTensorFrom2D(env, voiceEmbeddings)
 
@@ -77,7 +73,7 @@ class PocketTtsExecutor(
             val voiceInputs = buildInputsForSession(
                 lmMainModel,
                 flowState,
-                mapOf("sequence" to emptySeq, "text_embeddings" to voiceTensor)
+                mapOf(KEY_SEQUENCE to emptySeq, KEY_TEXT_EMBEDDINGS to voiceTensor)
             )
             var res = lmMainModel.run(voiceInputs)
             updateStateFromResults(flowState, res, lmMainModel)
@@ -85,7 +81,7 @@ class PocketTtsExecutor(
 
             // Text conditioning
             val tokenTensor = createLongTensor(env, tokenIds)
-            val textRes = textConditionerModel.run(mapOf("token_ids" to tokenTensor))
+            val textRes = textConditionerModel.run(mapOf(KEY_TOKEN_IDS to tokenTensor))
             val textEmb = textRes[0] as OnnxTensor
 
             // Ensure shape is [1, 1, 1024] or [1, N, 1024]
@@ -98,7 +94,7 @@ class PocketTtsExecutor(
             val mainInputs = buildInputsForSession(
                 lmMainModel,
                 flowState,
-                mapOf("sequence" to emptySeq, "text_embeddings" to textEmbTensor)
+                mapOf(KEY_SEQUENCE to emptySeq, KEY_TEXT_EMBEDDINGS to textEmbTensor)
             )
             res = lmMainModel.run(mainInputs)
             updateStateFromResults(flowState, res, lmMainModel)
@@ -106,15 +102,21 @@ class PocketTtsExecutor(
             textEmbTensor.close()
 
             // Autoregressive generation
-            var currLatent = createNaNTensor(env, longArrayOf(1L, 1L, frameSize.toLong()))
+            var currLatent = createNaNTensor(env, longArrayOf(1L, 1L, FRAME_SIZE))
             val generatedLatents = ArrayList<FloatArray>()
             var eosStep: Int? = null
 
-            for (step in 0 until maxFrames) {
+            // Seed and std for latent noise
+            val rng = if (config.seed > 0) Random(config.seed.toLong()) else Random()
+            val randomStd = if (config.temperature > 0) {
+                sqrt(config.temperature.toDouble()).toFloat()
+            } else 0f
+
+            for (step in 0 until MAX_FRAMES) {
                 val arInputs = buildInputsForSession(
                     lmMainModel,
                     flowState,
-                    mapOf("sequence" to currLatent, "text_embeddings" to emptyText)
+                    mapOf(KEY_SEQUENCE to currLatent, KEY_TEXT_EMBEDDINGS to emptyText)
                 )
                 val arRes = lmMainModel.run(arInputs)
 
@@ -129,51 +131,45 @@ class PocketTtsExecutor(
                 arRes.close()
 
                 if (eosStep == null && eosVal > -4.0f) eosStep = step
-                if (eosStep != null && step >= eosStep + framesAfterEos) break
+                if (eosStep != null && step >= eosStep + FRAMES_AFTER_EOS) break
 
-                // Flow matching
-                val rng = if (config.seed > 0) Random(config.seed.toLong()) else Random()
-                val std =
-                    if (config.temperature > 0) sqrt(config.temperature.toDouble()).toFloat() else 0f
-                val x = if (std > 0f) {
-                    FloatArray(32) { (rng.nextGaussian() * std).toFloat() }
+                // Calculate latent noise
+                val x = if (randomStd > 0f) {
+                    FloatArray(32) { (rng.nextGaussian() * randomStd).toFloat() }
                 } else {
                     FloatArray(32) { 0f }
                 }
 
-                val dt = 1.0f / config.diffusionSteps
-                for (j in 0 until config.diffusionSteps) {
-                    val s = floatArrayOf(j.toFloat() / config.diffusionSteps)
-                    val t = floatArrayOf((j + 1).toFloat() / config.diffusionSteps)
-                    val cTensor = createFloatTensorFrom1D(env, conditioning)
-                    val sTensor = createFloatTensorFrom1D(env, s, longArrayOf(1L, 1L))
-                    val tTensor = createFloatTensorFrom1D(env, t, longArrayOf(1L, 1L))
-                    val xTensor =
-                        createFloatTensorFrom1D(env, x, longArrayOf(1L, frameSize.toLong()))
+                val dt = 1.0f / config.steps
+                for (j in 0 until config.steps) {
+                    val s = floatArrayOf(j.toFloat() / config.steps)
+                    val t = floatArrayOf((j + 1).toFloat() / config.steps)
+                    val conditioningTensor = createFloatTensorFrom1D(env, conditioning)
+                    val simpleStepTensor = createFloatTensorFrom1D(env, s, longArrayOf(1L, 1L))
+                    val nextStepTensor = createFloatTensorFrom1D(env, t, longArrayOf(1L, 1L))
+                    val latentTensor = createFloatTensorFrom1D(env, x, longArrayOf(1L, FRAME_SIZE))
 
                     val flowInputs = HashMap<String, OnnxTensor>()
-                    flowInputs["c"] = cTensor
-                    flowInputs["s"] = sTensor
-                    flowInputs["t"] = tTensor
-                    flowInputs["x"] = xTensor
+                    flowInputs[KEY_CONDITIONING_TENSOR] = conditioningTensor
+                    flowInputs[KEY_SIMPLE_STEP_TENSOR] = simpleStepTensor
+                    flowInputs[KEY_NEXT_STEP_TENSOR] = nextStepTensor
+                    flowInputs[KEY_LATENT_TENSOR] = latentTensor
 
                     val flowRes = lmFlowModel.run(flowInputs)
                     val vTensor = flowRes[0] as OnnxTensor
-                    val v = extractFloatArrayFromTensor1D(vTensor)
+                    val v = extractFloatArrayFromTensor(vTensor)
 
                     for (k in x.indices) x[k] += v[k] * dt
 
                     flowRes.close()
-                    cTensor.close()
-                    sTensor.close()
-                    tTensor.close()
-                    xTensor.close()
+                    conditioningTensor.close()
+                    simpleStepTensor.close()
+                    nextStepTensor.close()
+                    latentTensor.close()
                 }
 
-                // Add latent
                 generatedLatents.add(x.copyOf())
 
-                // prepare currLatent for next AR step
                 currLatent.close()
                 currLatent = createFloatTensorFrom2DForLatent(env, x)
             }
@@ -182,7 +178,7 @@ class PocketTtsExecutor(
             val audioFloatsList = ArrayList<Float>()
             var idx = 0
             while (idx < generatedLatents.size) {
-                val end = min(idx + decodeChunkSize, generatedLatents.size)
+                val end = min(idx + DECODE_CHUNK_SIZE, generatedLatents.size)
                 val chunk = generatedLatents.subList(idx, end)
                 val latentTensor = createLatentsTensor(env, chunk)
 
@@ -196,7 +192,7 @@ class PocketTtsExecutor(
 
                 // audio out
                 val audioTensor = decRes[0] as OnnxTensor
-                val audioOut = extractFloatArrayFromTensor1D(audioTensor)
+                val audioOut = extractFloatArrayFromTensor(audioTensor)
                 audioFloatsList.addAll(audioOut.toList())
 
                 updateStateFromResults(decoderState, decRes, decoderModel)
@@ -211,9 +207,10 @@ class PocketTtsExecutor(
             emptySeq.close()
             emptyText.close()
             voiceTensor.close()
+
             // close all state tensors
-            for (v in flowState.values) v.close()
-            for (v in decoderState.values) v.close()
+            for (tensor in flowState.values) tensor.close()
+            for (tensor in decoderState.values) tensor.close()
         }
     }
 
@@ -289,16 +286,27 @@ class PocketTtsExecutor(
         for (i in tokens.indices) arr[i] = tokens[i].toLong()
         return OnnxTensor.createTensor(
             env,
-            java.nio.LongBuffer.wrap(arr),
+            LongBuffer.wrap(arr),
             longArrayOf(1L, tokens.size.toLong())
         )
     }
 
-    private fun createBoolTensor(shape: LongArray = longArrayOf(1L)): OnnxTensor {
-        val b = ByteArray(shape.fold(1L) { acc, v -> if (v <= 0L) acc else acc * v }.toInt())
-        if (b.isNotEmpty()) b[0] = 0
-        val bb = ByteBuffer.wrap(b)
-        return OnnxTensor.createTensor(onnx.getEnvironment(), bb, shape, OnnxJavaType.BOOL)
+    private fun createEmptyBoolTensor(): OnnxTensor {
+        return OnnxTensor.createTensor(
+            onnx.getEnvironment(),
+            EMPTY_BOOL_BUFFER.duplicate(),
+            longArrayOf(1L),
+            OnnxJavaType.BOOL
+        )
+    }
+
+    private fun createEmptyLongTensor(
+        env: ai.onnxruntime.OrtEnvironment,
+        shape: LongArray
+    ): OnnxTensor {
+        val total = shape.fold(1L) { acc, v -> if (v <= 0L) 0L else acc * v }
+        val buf = LongArray(total.toInt())
+        return OnnxTensor.createTensor(env, LongBuffer.wrap(buf), shape)
     }
 
     private fun extractScalarFloat(tensor: OnnxTensor): Float {
@@ -351,10 +359,6 @@ class PocketTtsExecutor(
         }
     }
 
-    private fun extractFloatArrayFromTensor1D(tensor: OnnxTensor): FloatArray {
-        return extractFloatArrayFromTensor(tensor)
-    }
-
     private fun normalizeTextEmb(
         env: ai.onnxruntime.OrtEnvironment,
         tensor: OnnxTensor
@@ -383,32 +387,20 @@ class PocketTtsExecutor(
         val env = onnx.getEnvironment()
 
         for ((name, node) in session.inputInfo) {
-            if (!name.startsWith("state_")) continue
+            if (!name.startsWith(STATE_PREFIX)) continue
             val infoAny = node.info
-            val shape = try {
-                (infoAny as? ai.onnxruntime.TensorInfo)?.shape ?: longArrayOf(0L)
-            } catch (_: Exception) {
-                longArrayOf(0L)
-            }
+            val shape = (infoAny as? ai.onnxruntime.TensorInfo)?.shape ?: longArrayOf(0L)
             val infoStr = infoAny.toString().lowercase()
+
             val tensor = when {
-                infoStr.contains("bool") -> createBoolTensor(shape)
-                infoStr.contains("int64") -> createEmptyLongTensor(env, shape)
+                infoStr.contains(TYPE_BOOL) -> createEmptyBoolTensor()
+                infoStr.contains(TYPE_INT64) -> createEmptyLongTensor(env, shape)
                 else -> createEmptyFloatTensor(env, shape)
             }
             state[name] = tensor
         }
 
         return state
-    }
-
-    private fun createEmptyLongTensor(
-        env: ai.onnxruntime.OrtEnvironment,
-        shape: LongArray
-    ): OnnxTensor {
-        val total = shape.fold(1L) { acc, v -> if (v <= 0L) 0L else acc * v }
-        val buf = LongArray(total.toInt())
-        return OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(buf), shape)
     }
 
     private fun updateStateFromResults(
@@ -419,8 +411,8 @@ class PocketTtsExecutor(
         val outputs = session.outputInfo.keys.toList()
         for (i in outputs.indices) {
             val name = outputs[i]
-            if (!name.startsWith("out_state_")) continue
-            val stateKey = "state_${name.removePrefix("out_state_")}"
+            if (!name.startsWith(OUT_STATE_PREFIX)) continue
+            val stateKey = "state_${name.removePrefix(OUT_STATE_PREFIX)}"
             val valObj = res[i]
             if (valObj is OnnxTensor) {
                 val v = valObj.value
@@ -444,15 +436,15 @@ class PocketTtsExecutor(
 
                     is LongArray -> OnnxTensor.createTensor(
                         onnx.getEnvironment(),
-                        java.nio.LongBuffer.wrap(v),
+                        LongBuffer.wrap(v),
                         shape
                     )
 
-                    is java.nio.LongBuffer -> {
+                    is LongBuffer -> {
                         v.rewind()
                         val a = LongArray(v.remaining()); v.get(a); OnnxTensor.createTensor(
                             onnx.getEnvironment(),
-                            java.nio.LongBuffer.wrap(a),
+                            LongBuffer.wrap(a),
                             shape
                         )
                     }
@@ -517,51 +509,41 @@ class PocketTtsExecutor(
     fun convertTensorToDeclared(declaredInfo: String, tensor: OnnxTensor): OnnxTensor {
         val env = onnx.getEnvironment()
 
-        if (declaredInfo.contains("bool") && !(tensor.value is ByteBuffer || tensor.value is ByteArray)) {
+        if (declaredInfo.contains(TYPE_BOOL) && !(tensor.value is ByteBuffer || tensor.value is ByteArray)) {
             val shape = tensor.info.shape
             return when (val v = tensor.value) {
                 is LongArray -> {
-                    val b = ByteArray(v.size); for (i in v.indices) b[i] =
-                        if (v[i] != 0L) 1 else 0
-                    OnnxTensor.createTensor(
-                        env,
-                        ByteBuffer.wrap(b),
-                        shape,
-                        OnnxJavaType.BOOL
-                    )
+                    val b = ByteArray(v.size) { i -> if (v[i] != 0L) 1 else 0 }
+                    OnnxTensor.createTensor(env, ByteBuffer.wrap(b), shape, OnnxJavaType.BOOL)
                 }
 
-                is java.nio.LongBuffer -> {
+                is LongBuffer -> {
                     v.rewind()
-                    val a = LongArray(v.remaining()); v.get(a)
-                    val b = ByteArray(a.size); for (i in a.indices) b[i] =
-                        if (a[i] != 0L) 1 else 0
-                    OnnxTensor.createTensor(
-                        env,
-                        ByteBuffer.wrap(b),
-                        shape,
-                        OnnxJavaType.BOOL
-                    )
+                    val b = ByteArray(v.remaining()).also {
+                        for (i in it.indices) it[i] = if (v.get() != 0L) 1 else 0
+                    }
+                    OnnxTensor.createTensor(env, ByteBuffer.wrap(b), shape, OnnxJavaType.BOOL)
                 }
 
                 else -> tensor
             }
         }
-        if (declaredInfo.contains("int64") && !(tensor.value is java.nio.LongBuffer || tensor.value is LongArray)) {
+        if (declaredInfo.contains(TYPE_INT64) && !(tensor.value is LongBuffer || tensor.value is LongArray)) {
             val shape = tensor.info.shape
             return when (val v = tensor.value) {
                 is ByteBuffer -> {
                     v.rewind()
-                    val n = v.remaining()
-                    val a = LongArray(n); for (i in 0 until n) a[i] =
-                        if (v.get(i) != 0.toByte()) 1L else 0L
-                    OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(a), shape)
+                    val b = LongArray(v.remaining()).also {
+                        for (i in it.indices) it[i] = if (v.get(i) != 0.toByte()) 1L else 0L
+                    }
+                    OnnxTensor.createTensor(env, LongBuffer.wrap(b), shape)
                 }
 
                 is ByteArray -> {
-                    val a = LongArray(v.size); for (i in v.indices) a[i] =
-                        if (v[i] != 0.toByte()) 1L else 0L
-                    OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(a), shape)
+                    val a = LongArray(v.size).also {
+                        for (i in it.indices) it[i] = if (v[i] != 0.toByte()) 1L else 0L
+                    }
+                    OnnxTensor.createTensor(env, LongBuffer.wrap(a), shape)
                 }
 
                 else -> tensor
@@ -622,52 +604,25 @@ class PocketTtsExecutor(
             is Array<*> -> {
                 when (val first = outVal[0]) {
                     is Array<*> -> {
-                        val inner = first
+                        val inner = first as Array<FloatArray>
                         val n = inner.size
-                        when (val d0 = inner[0]) {
-                            is FloatArray -> {
-                                val dim = d0.size
-                                val resultArr = Array(n) { FloatArray(dim) }
-                                for (i in 0 until n) {
-                                    val row = inner[i] as FloatArray
-                                    System.arraycopy(row, 0, resultArr[i], 0, dim)
-                                }
-                                resultArr
-                            }
+                        if (n == 0) return Array(0) { FloatArray(0) }
 
-                            is Array<*> -> {
-                                Array(0) { FloatArray(0) }
-                            }
-
-                            else -> {
-                                Array(0) { FloatArray(0) }
-                            }
-                        }
+                        Array(n) { inner[it].copyOf() } // Use copyOf for array duplication
                     }
-
-                    is FloatArray -> {
-                        val row = first
-                        arrayOf(row)
-                    }
-
-                    else -> {
-                        Array(0) { FloatArray(0) }
-                    }
+                    is FloatArray -> arrayOf(first)
+                    else -> Array(0) { FloatArray(0) }
                 }
             }
-
             is java.nio.FloatBuffer -> {
                 val buf = outVal
                 buf.rewind()
                 val total = buf.remaining()
                 val dims = total / 1024
-                val out = Array(dims) { FloatArray(1024) }
-                for (i in 0 until dims) {
-                    buf.get(out[i])
-                }
-                out
-            }
+                if (total % 1024 != 0) return Array(0) { FloatArray(0) }
 
+                Array(dims) { FloatArray(1024).also { buf.get(it) } }
+            }
             else -> Array(0) { FloatArray(0) }
         }
 
@@ -675,5 +630,28 @@ class PocketTtsExecutor(
         tensor.close()
 
         return embeddings
+    }
+
+    private companion object {
+        const val KEY_SEQUENCE = "sequence"
+        const val KEY_TOKEN_IDS = "token_ids"
+        const val KEY_TEXT_EMBEDDINGS = "text_embeddings"
+        const val KEY_CONDITIONING_TENSOR = "c"
+        const val KEY_SIMPLE_STEP_TENSOR = "s"
+        const val KEY_NEXT_STEP_TENSOR = "t"
+        const val KEY_LATENT_TENSOR = "x"
+
+        const val TYPE_BOOL = "bool"
+        const val TYPE_INT64 = "int64"
+
+        const val STATE_PREFIX = "state_"
+        const val OUT_STATE_PREFIX = "out_state_"
+
+        const val FRAME_SIZE = 32L
+        const val MAX_FRAMES = 500
+        const val DECODE_CHUNK_SIZE = 12
+        const val FRAMES_AFTER_EOS = 3
+
+        private val EMPTY_BOOL_BUFFER = ByteBuffer.wrap(byteArrayOf(0)).asReadOnlyBuffer()
     }
 }

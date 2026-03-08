@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.util.*
 import java.util.concurrent.Executors
+import kotlin.time.measureTime
 
 @Service
 class DefaultTtsService(
@@ -43,6 +44,8 @@ class DefaultTtsService(
                 TtsProvider.POCKET -> pocketTtsExecutor(job)
             }
 
+            logger.info("Executed $job, audio size: ${audio.size} bytes")
+            
             val fileId = storage.save(audio)
             job.fileId = fileId
             job.status = JobStatus.DONE

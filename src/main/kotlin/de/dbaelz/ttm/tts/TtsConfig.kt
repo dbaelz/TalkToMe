@@ -1,7 +1,7 @@
 package de.dbaelz.ttm.tts
 
 data class TtsConfig(
-    val diffusionSteps: Int = 10,
+    val steps: Int = 10,
     val temperature: Float = 0.5f,
     val seed: Int = 0
 )
