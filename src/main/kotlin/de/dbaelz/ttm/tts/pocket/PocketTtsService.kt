@@ -109,7 +109,7 @@ class PocketTtsService(
 
         // Init states (create according to model's declared inputs)
         val flowState = initStateFromSession(lmMainModel)
-        val mimiState = initStateFromSession(decoderModel)
+        val decoderState = initStateFromSession(decoderModel)
 
         try {
             // Voice conditioning
@@ -174,11 +174,11 @@ class PocketTtsService(
                 if (eosStep != null && step >= eosStep + framesAfterEos) break
 
                 // Flow matching
-                val x = FloatArray(frameSize) { 0f }
-                val std =
-                    if (config.temperature > 0) sqrt(config.temperature.toDouble()).toFloat() else 0f
-                if (std > 0f) {
-                    for (i in x.indices) x[i] = (rng.nextGaussian() * std).toFloat()
+                val std = if (config.temperature > 0) sqrt(config.temperature.toDouble()).toFloat() else 0f
+                val x = if (std > 0f) {
+                    FloatArray(32) { (rng.nextGaussian() * std).toFloat() }
+                } else {
+                    FloatArray(32) { 0f }
                 }
 
                 val dt = 1.0f / config.diffusionSteps
@@ -228,7 +228,11 @@ class PocketTtsService(
                 val latentTensor = createLatentsTensor(env, chunk)
 
                 val decoderInputs =
-                    buildInputsForSession(decoderModel, mimiState, mapOf("latent" to latentTensor))
+                    buildInputsForSession(
+                        decoderModel,
+                        decoderState,
+                        mapOf("latent" to latentTensor)
+                    )
                 val decRes = decoderModel.run(decoderInputs)
 
                 // audio out
@@ -236,8 +240,7 @@ class PocketTtsService(
                 val audioOut = extractFloatArrayFromTensor1D(audioTensor)
                 audioFloatsList.addAll(audioOut.toList())
 
-                // update mimi state
-                updateStateFromResults(mimiState, decRes, decoderModel)
+                updateStateFromResults(decoderState, decRes, decoderModel)
 
                 audioTensor.close()
                 decRes.close()
@@ -252,7 +255,7 @@ class PocketTtsService(
             voiceTensor.close()
             // close all state tensors
             for (v in flowState.values) v.close()
-            for (v in mimiState.values) v.close()
+            for (v in decoderState.values) v.close()
         }
     }
 
@@ -322,17 +325,6 @@ class PocketTtsService(
 
     private fun createLongTensor(
         env: ai.onnxruntime.OrtEnvironment,
-        values: LongArray
-    ): OnnxTensor {
-        return OnnxTensor.createTensor(
-            env,
-            java.nio.LongBuffer.wrap(values),
-            longArrayOf(values.size.toLong())
-        )
-    }
-
-    private fun createLongTensor(
-        env: ai.onnxruntime.OrtEnvironment,
         tokens: List<Int>
     ): OnnxTensor {
         val arr = LongArray(tokens.size)
@@ -344,9 +336,9 @@ class PocketTtsService(
         )
     }
 
-    private fun createBoolTensor(value: Boolean, shape: LongArray = longArrayOf(1L)): OnnxTensor {
+    private fun createBoolTensor(shape: LongArray = longArrayOf(1L)): OnnxTensor {
         val b = ByteArray(shape.fold(1L) { acc, v -> if (v <= 0L) acc else acc * v }.toInt())
-        if (b.isNotEmpty()) b[0] = if (value) 1 else 0
+        if (b.isNotEmpty()) b[0] = 0
         val bb = ByteBuffer.wrap(b)
         return OnnxTensor.createTensor(onnx.getEnvironment(), bb, shape, OnnxJavaType.BOOL)
     }
@@ -431,6 +423,7 @@ class PocketTtsService(
     private fun initStateFromSession(session: OrtSession): MutableMap<String, OnnxTensor> {
         val state = mutableMapOf<String, OnnxTensor>()
         val env = onnx.getEnvironment()
+
         for ((name, node) in session.inputInfo) {
             if (!name.startsWith("state_")) continue
             val infoAny = node.info
@@ -441,12 +434,13 @@ class PocketTtsService(
             }
             val infoStr = infoAny.toString().lowercase()
             val tensor = when {
-                infoStr.contains("bool") -> createBoolTensor(false, shape)
+                infoStr.contains("bool") -> createBoolTensor(shape)
                 infoStr.contains("int64") -> createEmptyLongTensor(env, shape)
                 else -> createEmptyFloatTensor(env, shape)
             }
             state[name] = tensor
         }
+
         return state
     }
 
@@ -544,195 +538,85 @@ class PocketTtsService(
         overrides: Map<String, OnnxTensor>
     ): MutableMap<String, OnnxTensor> {
         val inputs = LinkedHashMap<String, OnnxTensor>()
-        val env = onnx.getEnvironment()
 
-        fun convertTensorToDeclared(declaredInfo: String, tensor: OnnxTensor): OnnxTensor {
-            if (declaredInfo.contains("bool") && !(tensor.value is ByteBuffer || tensor.value is ByteArray)) {
-                val shape = tensor.info.shape
-                return when (val v = tensor.value) {
-                    is LongArray -> {
-                        val b = ByteArray(v.size); for (i in v.indices) b[i] =
-                            if (v[i] != 0L) 1 else 0
-                        OnnxTensor.createTensor(
-                            env,
-                            ByteBuffer.wrap(b),
-                            shape,
-                            OnnxJavaType.BOOL
-                        )
-                    }
-
-                    is java.nio.LongBuffer -> {
-                        v.rewind()
-                        val a = LongArray(v.remaining()); v.get(a)
-                        val b = ByteArray(a.size); for (i in a.indices) b[i] =
-                            if (a[i] != 0L) 1 else 0
-                        OnnxTensor.createTensor(
-                            env,
-                            ByteBuffer.wrap(b),
-                            shape,
-                            OnnxJavaType.BOOL
-                        )
-                    }
-
-                    else -> tensor
-                }
-            }
-            if (declaredInfo.contains("int64") && !(tensor.value is java.nio.LongBuffer || tensor.value is LongArray)) {
-                val shape = tensor.info.shape
-                return when (val v = tensor.value) {
-                    is ByteBuffer -> {
-                        v.rewind()
-                        val n = v.remaining()
-                        val a = LongArray(n); for (i in 0 until n) a[i] =
-                            if (v.get(i) != 0.toByte()) 1L else 0L
-                        OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(a), shape)
-                    }
-
-                    is ByteArray -> {
-                        val a = LongArray(v.size); for (i in v.indices) a[i] =
-                            if (v[i] != 0.toByte()) 1L else 0L
-                        OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(a), shape)
-                    }
-
-                    else -> tensor
-                }
-            }
-            return tensor
-        }
         for ((name, node) in session.inputInfo) {
             if (overrides.containsKey(name)) {
-                val declaredInfo = node.info.toString().lowercase()
-                inputs[name] = convertTensorToDeclared(declaredInfo, overrides[name]!!)
+                inputs[name] =
+                    convertTensorToDeclared(node.info.toString().lowercase(), overrides[name]!!)
                 continue
             }
+
             if (state.containsKey(name)) {
-                val st = state[name]!!
-                // ensure the state's tensor matches expected element type by comparing declared info strings
-                val declaredInfo = node.info.toString().lowercase()
-
-                if (declaredInfo.contains("bool") && !(st.value is ByteBuffer || st.value is ByteArray)) {
-                    // convert stored int64 -> bool byte tensor
-                    val shape = st.info.shape
-                    val newTensor = when (val stVal = st.value) {
-                        is LongArray -> {
-                            val b = ByteArray(stVal.size); for (i in stVal.indices) b[i] =
-                                if (stVal[i] != 0L) 1 else 0
-                            OnnxTensor.createTensor(
-                                env,
-                                ByteBuffer.wrap(b),
-                                shape,
-                                OnnxJavaType.BOOL
-                            )
-                        }
-
-                        is java.nio.LongBuffer -> {
-                            stVal.rewind()
-                            val a = LongArray(stVal.remaining()); stVal.get(a)
-                            val b = ByteArray(a.size); for (i in a.indices) b[i] =
-                                if (a[i] != 0L) 1 else 0
-                            OnnxTensor.createTensor(
-                                env,
-                                ByteBuffer.wrap(b),
-                                shape,
-                                OnnxJavaType.BOOL
-                            )
-                        }
-
-                        else -> st
-                    }
-                    inputs[name] = newTensor
-                } else if (declaredInfo.contains("int64") && !(st.value is java.nio.LongBuffer || st.value is LongArray)) {
-                    // convert stored bool/byte -> int64
-                    val shape = st.info.shape
-                    val newTensor = when (val stVal = st.value) {
-                        is ByteBuffer -> {
-                            stVal.rewind()
-                            val n = stVal.remaining()
-                            val a = LongArray(n); for (i in 0 until n) a[i] =
-                                if (stVal.get(i) != 0.toByte()) 1L else 0L
-                            OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(a), shape)
-                        }
-
-                        is ByteArray -> {
-                            val a = LongArray(stVal.size); for (i in stVal.indices) a[i] =
-                                if (stVal[i] != 0.toByte()) 1L else 0L
-                            OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(a), shape)
-                        }
-
-                        else -> st
-                    }
-                    inputs[name] = newTensor
-                } else {
-                    inputs[name] = st
-                }
+                inputs[name] =
+                    convertTensorToDeclared(node.info.toString().lowercase(), state[name]!!)
                 continue
             }
+        }
 
-            val infoAny = node.info
-            val shape = try {
-                (infoAny as? ai.onnxruntime.TensorInfo)?.shape ?: longArrayOf(0L)
-            } catch (_: Exception) {
-                longArrayOf(0L)
-            }
-            val infoStr = infoAny.toString().lowercase()
-            val tensor = when {
-                infoStr.contains("bool") -> createBoolTensor(false)
-                infoStr.contains("int64") -> createLongTensor(env, longArrayOf(0L))
-                else -> createEmptyFloatTensor(env, shape)
-            }
-            inputs[name] = tensor
-        }
-        // For decoder session, ensure declared bool inputs are actual boolean tensors (byte buffers)
-        try {
-            val maybeDecoder = onnx.getSession()[decoder]
-            if (session === maybeDecoder) {
-                for ((name, node) in session.inputInfo) {
-                    val declaredInfo = node.info.toString().lowercase()
-                    if (!declaredInfo.contains("bool")) continue
-                    val tensor = inputs[name] ?: continue
-                    val v = tensor.value
-                    if (v is LongArray) {
-                        val arr = ByteArray(v.size)
-                        for (i in v.indices) arr[i] = if (v[i] != 0L) 1 else 0
-                        inputs[name] = OnnxTensor.createTensor(
-                            env,
-                            ByteBuffer.wrap(arr),
-                            tensor.info.shape,
-                            OnnxJavaType.BOOL
-                        )
-                    } else if (v is java.nio.LongBuffer) {
-                        v.rewind()
-                        val a = LongArray(v.remaining())
-                        v.get(a)
-                        val arr = ByteArray(a.size)
-                        for (i in a.indices) arr[i] = if (a[i] != 0L) 1 else 0
-                        inputs[name] = OnnxTensor.createTensor(
-                            env,
-                            ByteBuffer.wrap(arr),
-                            tensor.info.shape,
-                            OnnxJavaType.BOOL
-                        )
-                    }
-                }
-                println("[PocketTtsService] Decoder inputs mapping:")
-                for ((k, v) in inputs) {
-                    val declared = session.inputInfo[k]?.info.toString()
-                    val actual = v.info.toString()
-                    println("  input=$k declared=$declared actual=$actual")
-                }
-            }
-        } catch (e: Exception) {
-            println("[PocketTtsService] Failed to enforce/print decoder mapping: ${e.message}")
-        }
         return inputs
+    }
+
+    fun convertTensorToDeclared(declaredInfo: String, tensor: OnnxTensor): OnnxTensor {
+        val env = onnx.getEnvironment()
+
+        if (declaredInfo.contains("bool") && !(tensor.value is ByteBuffer || tensor.value is ByteArray)) {
+            val shape = tensor.info.shape
+            return when (val v = tensor.value) {
+                is LongArray -> {
+                    val b = ByteArray(v.size); for (i in v.indices) b[i] =
+                        if (v[i] != 0L) 1 else 0
+                    OnnxTensor.createTensor(
+                        env,
+                        ByteBuffer.wrap(b),
+                        shape,
+                        OnnxJavaType.BOOL
+                    )
+                }
+
+                is java.nio.LongBuffer -> {
+                    v.rewind()
+                    val a = LongArray(v.remaining()); v.get(a)
+                    val b = ByteArray(a.size); for (i in a.indices) b[i] =
+                        if (a[i] != 0L) 1 else 0
+                    OnnxTensor.createTensor(
+                        env,
+                        ByteBuffer.wrap(b),
+                        shape,
+                        OnnxJavaType.BOOL
+                    )
+                }
+
+                else -> tensor
+            }
+        }
+        if (declaredInfo.contains("int64") && !(tensor.value is java.nio.LongBuffer || tensor.value is LongArray)) {
+            val shape = tensor.info.shape
+            return when (val v = tensor.value) {
+                is ByteBuffer -> {
+                    v.rewind()
+                    val n = v.remaining()
+                    val a = LongArray(n); for (i in 0 until n) a[i] =
+                        if (v.get(i) != 0.toByte()) 1L else 0L
+                    OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(a), shape)
+                }
+
+                is ByteArray -> {
+                    val a = LongArray(v.size); for (i in v.indices) a[i] =
+                        if (v[i] != 0.toByte()) 1L else 0L
+                    OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(a), shape)
+                }
+
+                else -> tensor
+            }
+        }
+        return tensor
     }
 
     private fun computeVoiceEmbeddings(encoder: OrtSession): Array<FloatArray> {
         val voicePath = Paths.get(modelsPath).resolve(voice).absolutePathString()
         val file = File(voicePath)
-        if (!file.exists()) {
-            throw IllegalArgumentException("Voice file not found: $voicePath")
-        }
+
+        if (!file.exists()) throw IllegalArgumentException("Voice file not found: $voicePath")
 
         val originalAis = javax.sound.sampled.AudioSystem.getAudioInputStream(file)
         val originalFormat = originalAis.format
