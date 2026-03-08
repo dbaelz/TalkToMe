@@ -6,6 +6,7 @@ import de.dbaelz.ttm.model.TtsProvider
 import de.dbaelz.ttm.repository.JobRepository
 import de.dbaelz.ttm.tts.TtsConfig
 import de.dbaelz.ttm.tts.pocket.PocketTtsExecutor
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.util.*
 import java.util.concurrent.Executors
@@ -16,11 +17,12 @@ class DefaultTtsService(
     private val repo: JobRepository,
     private val pocketTtsExecutor: PocketTtsExecutor,
 ) : TtsService {
+    private val logger = LoggerFactory.getLogger(DefaultTtsService::class.java)
     private val executor = Executors.newFixedThreadPool(2)
 
     override fun generate(text: String, config: TtsConfig, provider: TtsProvider): TtsJob {
         val id = UUID.randomUUID().toString()
-        val job = TtsJob(id = id, text = text, config = config)
+        val job = TtsJob(id = id, text = text, config = config, provider = provider)
         repo.save(job)
 
         executor.submit {
@@ -34,6 +36,8 @@ class DefaultTtsService(
         try {
             job.status = JobStatus.RUNNING
             repo.save(job)
+
+            logger.info("Executing $job with provider ${provider.name}")
 
             val audio = when (provider) {
                 TtsProvider.POCKET -> pocketTtsExecutor(job)

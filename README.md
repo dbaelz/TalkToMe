@@ -7,16 +7,16 @@ It's not performance-optimized, but rather focused on getting a working prototyp
 
 ## Features
 - Text-to-speech conversion using ONNX Runtime (work-in-progress) with GPU (CUDA) and CPU support. GPU is only supported for Windows x64 and Linux x64. See [documentation](https://onnxruntime.ai/docs/get-started/with-java.html)
-- Simple job queue and retrieval utilities (developer-focused)
+- Simple job queue and basic support for multiple providers (currently only Pocket TTS implemented)
 - Waveform sampling and helper utilities for audio processing
 - Local storage of generated audio (`storage/`)
 
-### Models
-Currently only [Pocket TTS](https://huggingface.co/kyutai/pocket-tts) with exported [ONNX models](https://huggingface.co/KevinAHM/pocket-tts-onnx) is supprted.
+### Models/Providers
+Currently only [Pocket TTS](https://huggingface.co/kyutai/pocket-tts) with exported [ONNX models](https://huggingface.co/KevinAHM/pocket-tts-onnx) is supported.
 The models can be placed anywhere on the filesystem, but the default path is `models/pocket-tts/` (configurable via `application.properties`).
 
 ### Configuration
-Configuration with [application.properties](src/main/resources/application.properties)``.
+Configuration with [application.properties](src/main/resources/application.properties).
 
 
 ### Development

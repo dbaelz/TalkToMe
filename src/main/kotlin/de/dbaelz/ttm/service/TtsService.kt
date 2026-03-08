@@ -7,8 +7,8 @@ import de.dbaelz.ttm.tts.TtsConfig
 interface TtsService {
     fun generate(
         text: String,
-        config: TtsConfig = TtsConfig(),
-        provider: TtsProvider = TtsProvider.POCKET
+        config: TtsConfig,
+        provider: TtsProvider
     ): TtsJob
 
     fun getJob(id: String): TtsJob?

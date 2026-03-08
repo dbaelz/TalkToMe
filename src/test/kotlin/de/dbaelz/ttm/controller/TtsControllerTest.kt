@@ -53,6 +53,41 @@ class TtsControllerTest @Autowired constructor(
     }
 
     @Test
+    fun `generateAudio - with provider - success`() {
+        val request = mapOf("text" to "Hello", "provider" to "pocket")
+
+        mockMvc.perform(
+            post("/api/tts")
+                .header("Authorization", authHeader)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request))
+        )
+            .andExpect(status().isAccepted)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.id", notNullValue()))
+            .andExpect(jsonPath("$.text").value("Hello"))
+            .andExpect(jsonPath("$.provider").value("POCKET"))
+    }
+
+    @Test
+    fun `generateAudio - with invalid provider - bad request`() {
+        val request = mapOf("text" to "Hello", "provider" to "invalid")
+
+        mockMvc.perform(
+            post("/api/tts")
+                .header("Authorization", authHeader)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request))
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.error").value("INVALID_PROVIDER"))
+            .andExpect(jsonPath("$.message").value("Provider 'invalid' is not supported"))
+            .andExpect(jsonPath("$.allowedProviders").isArray)
+            .andExpect(jsonPath("$.allowedProviders[0]").value("POCKET"))
+    }
+
+    @Test
     fun `generateAudio - bad request missing text`() {
         val request = emptyMap<String, String>()
         mockMvc.perform(
