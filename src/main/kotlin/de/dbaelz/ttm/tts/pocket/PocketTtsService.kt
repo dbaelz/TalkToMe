@@ -142,13 +142,12 @@ class PocketTtsService(
             res = lmMainModel.run(mainInputs)
             updateStateFromResults(flowState, res, lmMainModel)
             res.close()
+            textEmbTensor.close()
 
             // Autoregressive generation
             var currLatent = createNaNTensor(env, longArrayOf(1L, 1L, frameSize.toLong()))
             val generatedLatents = ArrayList<FloatArray>()
             var eosStep: Int? = null
-
-            val rng = Random()
 
             for (step in 0 until maxFrames) {
                 val arInputs = buildInputsForSession(
@@ -166,14 +165,13 @@ class PocketTtsService(
                 val eosVal = extractScalarFloat(eosTensor)
 
                 updateStateFromResults(flowState, arRes, lmMainModel)
-                conditioningTensor.close()
-                eosTensor.close()
                 arRes.close()
 
                 if (eosStep == null && eosVal > -4.0f) eosStep = step
                 if (eosStep != null && step >= eosStep + framesAfterEos) break
 
                 // Flow matching
+                val rng = if (config.seed > 0) Random(config.seed.toLong()) else Random()
                 val std = if (config.temperature > 0) sqrt(config.temperature.toDouble()).toFloat() else 0f
                 val x = if (std > 0f) {
                     FloatArray(32) { (rng.nextGaussian() * std).toFloat() }
@@ -203,7 +201,6 @@ class PocketTtsService(
 
                     for (k in x.indices) x[k] += v[k] * dt
 
-                    vTensor.close()
                     flowRes.close()
                     cTensor.close()
                     sTensor.close()
@@ -242,7 +239,6 @@ class PocketTtsService(
 
                 updateStateFromResults(decoderState, decRes, decoderModel)
 
-                audioTensor.close()
                 decRes.close()
                 latentTensor.close()
                 idx = end
@@ -725,6 +721,7 @@ class PocketTtsService(
 
     data class Config(
         val diffusionSteps: Int = 10,
-        val temperature: Float = 0.7f
+        val temperature: Float = 0.7f,
+        val seed: Int = 0
     )
 }
