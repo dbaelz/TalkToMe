@@ -38,16 +38,15 @@ class PocketTtsService(
     private val storage: StorageService,
     private val repo: JobRepository
 ) : TtsService {
-    init {
-        onnx.loadModelFiles(
-            modelsPath = modelsPath,
-            modelFiles = listOf(encoder, textConditioner, lmMain, lmFlow, decoder)
-        )
-    }
-
     private val executor = Executors.newFixedThreadPool(2)
 
     override fun generate(text: String, config: TtsConfig): TtsJob {
+        onnx.loadModelFiles(
+            modelGroupName = MODEL_GROUP_NAME,
+            modelsPath = modelsPath,
+            modelFiles = listOf(encoder, textConditioner, lmMain, lmFlow, decoder)
+        )
+
         val id = UUID.randomUUID().toString()
         val job = TtsJob(id = id, text = text, config = config)
         repo.save(job)
@@ -77,18 +76,11 @@ class PocketTtsService(
     }
 
     private fun generateAudio(text: String, config: TtsConfig): ByteArray {
-        val session = onnx.getSession()
-        val textConditionerModel = session[textConditioner]
-        val lmMainModel = session[lmMain]
-        val lmFlowModel = session[lmFlow]
-        val decoderModel = session[decoder]
-        val encoderModel = session[encoder]
-
-        if (textConditionerModel == null || lmMainModel == null
-            || lmFlowModel == null || decoderModel == null || encoderModel == null
-        ) {
-            throw IllegalStateException("One or more ONNX models could not be loaded")
-        }
+        val textConditionerModel = onnx.getModel(MODEL_GROUP_NAME, textConditioner)
+        val lmMainModel = onnx.getModel(MODEL_GROUP_NAME, lmMain)
+        val lmFlowModel = onnx.getModel(MODEL_GROUP_NAME, lmFlow)
+        val decoderModel = onnx.getModel(MODEL_GROUP_NAME, decoder)
+        val encoderModel = onnx.getModel(MODEL_GROUP_NAME, encoder)
 
         val voiceEmbeddings = computeVoiceEmbeddings(encoderModel)
         if (voiceEmbeddings.isEmpty()) throw IllegalArgumentException("Voice embedding produced no data")
@@ -173,7 +165,8 @@ class PocketTtsService(
 
                 // Flow matching
                 val rng = if (config.seed > 0) Random(config.seed.toLong()) else Random()
-                val std = if (config.temperature > 0) sqrt(config.temperature.toDouble()).toFloat() else 0f
+                val std =
+                    if (config.temperature > 0) sqrt(config.temperature.toDouble()).toFloat() else 0f
                 val x = if (std > 0f) {
                     FloatArray(32) { (rng.nextGaussian() * std).toFloat() }
                 } else {
@@ -719,4 +712,8 @@ class PocketTtsService(
 
     override fun getJob(id: String): TtsJob? = repo.findById(id)
     override fun getFile(id: String): ByteArray? = storage.load(id)
+
+    private companion object {
+        const val MODEL_GROUP_NAME = "pocket-tts"
+    }
 }

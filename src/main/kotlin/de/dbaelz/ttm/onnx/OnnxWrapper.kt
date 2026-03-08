@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import java.nio.file.Paths
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.absolutePathString
 
 @Component
@@ -16,10 +17,18 @@ class OnnxWrapper(
     private val logger = LoggerFactory.getLogger(OnnxWrapper::class.java)
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
 
-    private val sessions: MutableMap<String, OrtSession> = mutableMapOf()
+    private val sessions: MutableMap<ModelFileKey, OrtSession> = ConcurrentHashMap()
 
-    fun loadModelFiles(modelsPath: String, modelFiles: List<String>) {
-        val unloaded = modelFiles.filterNot { sessions.contains(it) }
+    fun loadModelFiles(modelGroupName: String, modelsPath: String, modelFiles: List<String>) {
+        // TODO: Very simple solution for now. Always unload all models of the previous group.
+        sessions.entries.firstOrNull()?.let {
+            if (it.key.modelGroupName != modelGroupName) {
+                unloadModelsForGroup(it.key.modelGroupName)
+            }
+        }
+
+        val unloaded =
+            modelFiles.filterNot { sessions.containsKey(ModelFileKey(modelGroupName, it)) }
 
         val basePath = Paths.get(modelsPath)
 
@@ -42,14 +51,30 @@ class OnnxWrapper(
                     basePath.resolve(fileName).absolutePathString(),
                     sessionOptions
                 )
-                sessions[fileName] = session
+                sessions[ModelFileKey(modelGroupName, fileName)] = session
             } catch (e: Exception) {
                 logger.error("Failed to load ONNX model file: {}", fileName, e)
             }
         }
     }
 
+    private fun unloadModelsForGroup(modelGroupName: String) {
+        val keysToUnload = sessions.keys.filter { key ->
+            key.modelGroupName == modelGroupName
+        }
+
+        keysToUnload.forEach { key ->
+            sessions[key]?.close()
+            sessions.remove(key)
+        }
+    }
+
     fun getEnvironment() = env
 
-    fun getSession() = sessions.toMap()
+    fun getModel(modelGroupName: String, fileName: String): OrtSession {
+        return sessions[ModelFileKey(modelGroupName, fileName)]
+            ?: throw IllegalArgumentException("Model file not loaded: $fileName in group $modelGroupName")
+    }
+
+    data class ModelFileKey(val modelGroupName: String, val fileName: String)
 }
