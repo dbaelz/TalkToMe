@@ -4,14 +4,11 @@ import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtSession
 import de.dbaelz.ttm.audio.WaveformSampler
-import de.dbaelz.ttm.model.JobStatus
 import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.model.TtsProvider
 import de.dbaelz.ttm.onnx.OnnxWrapper
-import de.dbaelz.ttm.repository.JobRepository
-import de.dbaelz.ttm.service.StorageService
-import de.dbaelz.ttm.service.TtsService
 import de.dbaelz.ttm.tts.TtsConfig
+import de.dbaelz.ttm.tts.TtsExecutor
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.io.File
@@ -19,13 +16,12 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Paths
 import java.util.*
-import java.util.concurrent.Executors
 import kotlin.io.path.absolutePathString
 import kotlin.math.min
 import kotlin.math.sqrt
 
 @Service
-class PocketTtsService(
+class PocketTtsExecutor(
     @Value($$"${tts.models.pocket-tts}") private val modelsPath: String,
     @Value($$"${tts.models.pocket-tts.encoder}") private val encoder: String,
     @Value($$"${tts.models.pocket-tts.text_conditioner}") private val textConditioner: String,
@@ -35,45 +31,16 @@ class PocketTtsService(
     @Value($$"${tts.models.pocket-tts.voice}") private val voice: String,
     private val tokenizer: SentencePieceTokenizer,
     private val onnx: OnnxWrapper,
-    private val waveformSampler: WaveformSampler,
-    private val storage: StorageService,
-    private val repo: JobRepository
-) : TtsService {
-    private val executor = Executors.newFixedThreadPool(2)
-
-    override fun generate(text: String, config: TtsConfig): TtsJob {
+    private val waveformSampler: WaveformSampler
+) : TtsExecutor {
+    override fun invoke(job: TtsJob): ByteArray {
         onnx.loadModelFiles(
             provider = TtsProvider.POCKET,
             modelsPath = modelsPath,
             modelFiles = listOf(encoder, textConditioner, lmMain, lmFlow, decoder)
         )
 
-        val id = UUID.randomUUID().toString()
-        val job = TtsJob(id = id, text = text, config = config)
-        repo.save(job)
-
-        executor.submit {
-            process(job)
-        }
-
-        return job
-    }
-
-    private fun process(job: TtsJob) {
-        try {
-            job.status = JobStatus.RUNNING
-            repo.save(job)
-
-            val audio = generateAudio(job.text, job.config)
-
-            val fileId = storage.save(audio)
-            job.fileId = fileId
-            job.status = JobStatus.DONE
-            repo.save(job)
-        } catch (_: Exception) {
-            job.status = JobStatus.FAILED
-            repo.save(job)
-        }
+        return generateAudio(job.text, job.config)
     }
 
     private fun generateAudio(text: String, config: TtsConfig): ByteArray {
@@ -709,8 +676,4 @@ class PocketTtsService(
 
         return embeddings
     }
-
-
-    override fun getJob(id: String): TtsJob? = repo.findById(id)
-    override fun getFile(id: String): ByteArray? = storage.load(id)
 }
