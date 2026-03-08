@@ -10,6 +10,7 @@ import de.dbaelz.ttm.onnx.OnnxWrapper
 import de.dbaelz.ttm.repository.JobRepository
 import de.dbaelz.ttm.service.StorageService
 import de.dbaelz.ttm.service.TtsService
+import de.dbaelz.ttm.tts.TtsConfig
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.io.File
@@ -46,9 +47,9 @@ class PocketTtsService(
 
     private val executor = Executors.newFixedThreadPool(2)
 
-    override fun generate(text: String): TtsJob {
+    override fun generate(text: String, config: TtsConfig): TtsJob {
         val id = UUID.randomUUID().toString()
-        val job = TtsJob(id = id, text = text)
+        val job = TtsJob(id = id, text = text, config = config)
         repo.save(job)
 
         executor.submit {
@@ -63,7 +64,7 @@ class PocketTtsService(
             job.status = JobStatus.RUNNING
             repo.save(job)
 
-            val audio = generateAudio(job.text)
+            val audio = generateAudio(job.text, job.config)
 
             val fileId = storage.save(audio)
             job.fileId = fileId
@@ -75,7 +76,7 @@ class PocketTtsService(
         }
     }
 
-    private fun generateAudio(text: String, config: Config = Config()): ByteArray {
+    private fun generateAudio(text: String, config: TtsConfig): ByteArray {
         val session = onnx.getSession()
         val textConditionerModel = session[textConditioner]
         val lmMainModel = session[lmMain]
@@ -718,10 +719,4 @@ class PocketTtsService(
 
     override fun getJob(id: String): TtsJob? = repo.findById(id)
     override fun getFile(id: String): ByteArray? = storage.load(id)
-
-    data class Config(
-        val diffusionSteps: Int = 10,
-        val temperature: Float = 0.7f,
-        val seed: Int = 0
-    )
 }

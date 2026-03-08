@@ -1,6 +1,7 @@
 package de.dbaelz.ttm.controller
 
 import de.dbaelz.ttm.model.TtsJob
+import de.dbaelz.ttm.tts.TtsConfig
 import de.dbaelz.ttm.tts.pocket.PocketTtsService
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -9,10 +10,12 @@ import org.springframework.web.bind.annotation.*
 @RequestMapping("/api/tts")
 class TtsController(private val pocketTtsService: PocketTtsService) {
 
+    data class GenerateRequest(val text: String?, val config: TtsConfig? = null)
+
     @PostMapping
-    fun generateAudio(@RequestBody request: Map<String, String>): ResponseEntity<TtsJob> {
-        val text = request["text"] ?: return ResponseEntity.badRequest().build()
-        val job = pocketTtsService.generate(text)
+    fun generateAudio(@RequestBody request: GenerateRequest): ResponseEntity<TtsJob> {
+        val text = request.text ?: return ResponseEntity.badRequest().build()
+        val job = pocketTtsService.generate(text, request.config ?: TtsConfig())
         return ResponseEntity.accepted().body(job)
     }
 
@@ -30,4 +33,3 @@ class TtsController(private val pocketTtsService: PocketTtsService) {
             .body(audio)
     }
 }
-
