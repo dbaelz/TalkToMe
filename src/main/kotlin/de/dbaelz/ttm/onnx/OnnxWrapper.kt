@@ -2,6 +2,7 @@ package de.dbaelz.ttm.onnx
 
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import de.dbaelz.ttm.model.TtsProvider
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
@@ -19,16 +20,16 @@ class OnnxWrapper(
 
     private val sessions: MutableMap<ModelFileKey, OrtSession> = ConcurrentHashMap()
 
-    fun loadModelFiles(modelGroupName: String, modelsPath: String, modelFiles: List<String>) {
+    fun loadModelFiles(provider: TtsProvider, modelsPath: String, modelFiles: List<String>) {
         // TODO: Very simple solution for now. Always unload all models of the previous group.
         sessions.entries.firstOrNull()?.let {
-            if (it.key.modelGroupName != modelGroupName) {
-                unloadModelsForGroup(it.key.modelGroupName)
+            if (it.key.provider != provider) {
+                unloadModelsForGroup(it.key.provider)
             }
         }
 
         val unloaded =
-            modelFiles.filterNot { sessions.containsKey(ModelFileKey(modelGroupName, it)) }
+            modelFiles.filterNot { sessions.containsKey(ModelFileKey(provider, it)) }
 
         val basePath = Paths.get(modelsPath)
 
@@ -51,16 +52,16 @@ class OnnxWrapper(
                     basePath.resolve(fileName).absolutePathString(),
                     sessionOptions
                 )
-                sessions[ModelFileKey(modelGroupName, fileName)] = session
+                sessions[ModelFileKey(provider, fileName)] = session
             } catch (e: Exception) {
                 logger.error("Failed to load ONNX model file: {}", fileName, e)
             }
         }
     }
 
-    private fun unloadModelsForGroup(modelGroupName: String) {
+    private fun unloadModelsForGroup(provider: TtsProvider) {
         val keysToUnload = sessions.keys.filter { key ->
-            key.modelGroupName == modelGroupName
+            key.provider == provider
         }
 
         keysToUnload.forEach { key ->
@@ -71,10 +72,10 @@ class OnnxWrapper(
 
     fun getEnvironment() = env
 
-    fun getModel(modelGroupName: String, fileName: String): OrtSession {
-        return sessions[ModelFileKey(modelGroupName, fileName)]
-            ?: throw IllegalArgumentException("Model file not loaded: $fileName in group $modelGroupName")
+    fun getModel(provider: TtsProvider, fileName: String): OrtSession {
+        return sessions[ModelFileKey(provider, fileName)]
+            ?: throw IllegalArgumentException("Model file not loaded: $fileName in provider $provider")
     }
 
-    data class ModelFileKey(val modelGroupName: String, val fileName: String)
+    data class ModelFileKey(val provider: TtsProvider, val fileName: String)
 }

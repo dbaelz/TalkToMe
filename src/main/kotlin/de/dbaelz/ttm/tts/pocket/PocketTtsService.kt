@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtSession
 import de.dbaelz.ttm.audio.WaveformSampler
 import de.dbaelz.ttm.model.JobStatus
 import de.dbaelz.ttm.model.TtsJob
+import de.dbaelz.ttm.model.TtsProvider
 import de.dbaelz.ttm.onnx.OnnxWrapper
 import de.dbaelz.ttm.repository.JobRepository
 import de.dbaelz.ttm.service.StorageService
@@ -42,7 +43,7 @@ class PocketTtsService(
 
     override fun generate(text: String, config: TtsConfig): TtsJob {
         onnx.loadModelFiles(
-            modelGroupName = MODEL_GROUP_NAME,
+            provider = TtsProvider.POCKET,
             modelsPath = modelsPath,
             modelFiles = listOf(encoder, textConditioner, lmMain, lmFlow, decoder)
         )
@@ -76,11 +77,11 @@ class PocketTtsService(
     }
 
     private fun generateAudio(text: String, config: TtsConfig): ByteArray {
-        val textConditionerModel = onnx.getModel(MODEL_GROUP_NAME, textConditioner)
-        val lmMainModel = onnx.getModel(MODEL_GROUP_NAME, lmMain)
-        val lmFlowModel = onnx.getModel(MODEL_GROUP_NAME, lmFlow)
-        val decoderModel = onnx.getModel(MODEL_GROUP_NAME, decoder)
-        val encoderModel = onnx.getModel(MODEL_GROUP_NAME, encoder)
+        val textConditionerModel = onnx.getModel(TtsProvider.POCKET, textConditioner)
+        val lmMainModel = onnx.getModel(TtsProvider.POCKET, lmMain)
+        val lmFlowModel = onnx.getModel(TtsProvider.POCKET, lmFlow)
+        val decoderModel = onnx.getModel(TtsProvider.POCKET, decoder)
+        val encoderModel = onnx.getModel(TtsProvider.POCKET, encoder)
 
         val voiceEmbeddings = computeVoiceEmbeddings(encoderModel)
         if (voiceEmbeddings.isEmpty()) throw IllegalArgumentException("Voice embedding produced no data")
@@ -712,8 +713,4 @@ class PocketTtsService(
 
     override fun getJob(id: String): TtsJob? = repo.findById(id)
     override fun getFile(id: String): ByteArray? = storage.load(id)
-
-    private companion object {
-        const val MODEL_GROUP_NAME = "pocket-tts"
-    }
 }

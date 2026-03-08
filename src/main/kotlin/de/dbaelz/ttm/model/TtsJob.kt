@@ -7,9 +7,14 @@ data class TtsJob(
     val id: String,
     val text: String,
     val config: TtsConfig = TtsConfig(),
+    val provider: TtsProvider = TtsProvider.POCKET,
     val createdAt: Instant = Instant.now(),
     var status: JobStatus = JobStatus.PENDING,
     var fileId: String? = null
 )
 
 enum class JobStatus { PENDING, RUNNING, DONE, FAILED }
+
+enum class TtsProvider {
+    POCKET
+}
