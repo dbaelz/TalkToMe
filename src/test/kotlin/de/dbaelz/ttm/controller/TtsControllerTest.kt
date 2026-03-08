@@ -53,8 +53,8 @@ class TtsControllerTest @Autowired constructor(
     }
 
     @Test
-    fun `generateAudio - with provider - success`() {
-        val request = mapOf("text" to "Hello", "provider" to "pocket")
+    fun `generateAudio - with engine - success`() {
+        val request = mapOf("text" to "Hello", "engine" to "pocket")
 
         mockMvc.perform(
             post("/api/tts")
@@ -66,12 +66,12 @@ class TtsControllerTest @Autowired constructor(
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.id", notNullValue()))
             .andExpect(jsonPath("$.text").value("Hello"))
-            .andExpect(jsonPath("$.provider").value("POCKET"))
+            .andExpect(jsonPath("$.engine").value("POCKET"))
     }
 
     @Test
-    fun `generateAudio - with invalid provider - bad request`() {
-        val request = mapOf("text" to "Hello", "provider" to "invalid")
+    fun `generateAudio - with invalid engine - bad request`() {
+        val request = mapOf("text" to "Hello", "engine" to "invalid")
 
         mockMvc.perform(
             post("/api/tts")
@@ -81,10 +81,10 @@ class TtsControllerTest @Autowired constructor(
         )
             .andExpect(status().isBadRequest)
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-            .andExpect(jsonPath("$.error").value("INVALID_PROVIDER"))
-            .andExpect(jsonPath("$.message").value("Provider 'invalid' is not supported"))
-            .andExpect(jsonPath("$.allowedProviders").isArray)
-            .andExpect(jsonPath("$.allowedProviders[0]").value("POCKET"))
+            .andExpect(jsonPath("$.error").value("INVALID_ENGINE"))
+            .andExpect(jsonPath("$.message").value("Engine 'invalid' is not supported"))
+            .andExpect(jsonPath("$.allowedEngines").isArray)
+            .andExpect(jsonPath("$.allowedEngines[0]").value("POCKET"))
     }
 
     @Test

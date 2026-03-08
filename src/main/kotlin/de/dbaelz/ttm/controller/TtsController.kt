@@ -1,7 +1,7 @@
 package de.dbaelz.ttm.controller
 
 import de.dbaelz.ttm.model.TtsJob
-import de.dbaelz.ttm.model.TtsProvider
+import de.dbaelz.ttm.model.TtsEngine
 import de.dbaelz.ttm.service.TtsService
 import de.dbaelz.ttm.tts.TtsConfig
 import org.springframework.http.ResponseEntity
@@ -11,28 +11,28 @@ import org.springframework.web.bind.annotation.*
 @RequestMapping("/api/tts")
 class TtsController(private val ttsService: TtsService) {
 
-    data class GenerateRequest(val text: String?, val config: TtsConfig? = null, val provider: String? = null)
+    data class GenerateRequest(val text: String?, val config: TtsConfig? = null, val engine: String? = null)
 
     @PostMapping
     fun generateAudio(@RequestBody request: GenerateRequest): ResponseEntity<Any> {
         val text = request.text ?: return ResponseEntity.badRequest().build()
-        val providerName = request.provider?.trim()?.takeIf { it.isNotEmpty() }
-        val provider = if (providerName != null) {
+        val engineName = request.engine?.trim()?.takeIf { it.isNotEmpty() }
+        val engine = if (engineName != null) {
             try {
-                TtsProvider.valueOf(providerName.uppercase())
+                TtsEngine.valueOf(engineName.uppercase())
             } catch (_: IllegalArgumentException) {
                 val body = mapOf(
-                    "error" to "INVALID_PROVIDER",
-                    "message" to "Provider '$providerName' is not supported",
-                    "allowedProviders" to TtsProvider.entries.map { it.name }
+                    "error" to "INVALID_ENGINE",
+                    "message" to "Engine '$engineName' is not supported",
+                    "allowedEngines" to TtsEngine.entries.map { it.name }
                 )
                 return ResponseEntity.badRequest().body(body)
             }
         } else {
-            TtsProvider.POCKET
+            TtsEngine.POCKET
         }
 
-        val job = ttsService.generate(text, request.config ?: TtsConfig(), provider)
+        val job = ttsService.generate(text, request.config ?: TtsConfig(), engine)
         return ResponseEntity.accepted().body(job)
     }
 

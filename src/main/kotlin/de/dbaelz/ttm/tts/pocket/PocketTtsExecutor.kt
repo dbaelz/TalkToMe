@@ -5,7 +5,7 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtSession
 import de.dbaelz.ttm.audio.WaveformSampler
 import de.dbaelz.ttm.model.TtsJob
-import de.dbaelz.ttm.model.TtsProvider
+import de.dbaelz.ttm.model.TtsEngine
 import de.dbaelz.ttm.onnx.OnnxWrapper
 import de.dbaelz.ttm.tts.TtsConfig
 import de.dbaelz.ttm.tts.TtsExecutor
@@ -36,7 +36,7 @@ class PocketTtsExecutor(
 ) : TtsExecutor {
     override fun invoke(job: TtsJob): ByteArray {
         onnx.loadModelFiles(
-            provider = TtsProvider.POCKET,
+            engine = TtsEngine.POCKET,
             modelsPath = modelsPath,
             modelFiles = listOf(encoder, textConditioner, lmMain, lmFlow, decoder)
         )
@@ -45,11 +45,11 @@ class PocketTtsExecutor(
     }
 
     private fun generateAudio(text: String, config: TtsConfig): ByteArray {
-        val textConditionerModel = onnx.getModel(TtsProvider.POCKET, textConditioner)
-        val lmMainModel = onnx.getModel(TtsProvider.POCKET, lmMain)
-        val lmFlowModel = onnx.getModel(TtsProvider.POCKET, lmFlow)
-        val decoderModel = onnx.getModel(TtsProvider.POCKET, decoder)
-        val encoderModel = onnx.getModel(TtsProvider.POCKET, encoder)
+        val textConditionerModel = onnx.getModel(TtsEngine.POCKET, textConditioner)
+        val lmMainModel = onnx.getModel(TtsEngine.POCKET, lmMain)
+        val lmFlowModel = onnx.getModel(TtsEngine.POCKET, lmFlow)
+        val decoderModel = onnx.getModel(TtsEngine.POCKET, decoder)
+        val encoderModel = onnx.getModel(TtsEngine.POCKET, encoder)
 
         val voiceEmbeddings = computeVoiceEmbeddings(encoderModel)
         if (voiceEmbeddings.isEmpty()) throw IllegalArgumentException("Voice embedding produced no data")
