@@ -62,7 +62,15 @@ class PocketTtsExecutor(
         // Prepare tensors used repeatedly
         val emptySeq = createEmptyFloatTensor(env, longArrayOf(1L, 0L, FRAME_SIZE))
         val emptyText = createEmptyFloatTensor(env, longArrayOf(1L, 0L, 1024L))
-        val voiceTensor = createFloatTensorFrom2D(env, voiceEmbeddings)
+
+        val numEmbeddings = voiceEmbeddings.size / VOICE_EMBEDDING_SIZE
+        val embeddingSize = if (voiceEmbeddings.isNotEmpty()) voiceEmbeddings.size / numEmbeddings else 0
+        val voiceTensor = createFloatTensorFrom1D(
+            env = env,
+            flatData = voiceEmbeddings,
+            numEmbeddings = numEmbeddings,
+            embeddingSize = embeddingSize
+        )
 
         // Init states (create according to model's declared inputs)
         val flowState = initStateFromSession(lmMainModel)
@@ -228,18 +236,16 @@ class PocketTtsExecutor(
         )
     }
 
-    private fun createFloatTensorFrom2D(
+    private fun createFloatTensorFrom1D(
         env: ai.onnxruntime.OrtEnvironment,
-        data: Array<FloatArray>
+        flatData: FloatArray,
+        numEmbeddings: Int,
+        embeddingSize: Int
     ): OnnxTensor {
-        val n = data.size
-        val d = if (n > 0) data[0].size else 0
-        val flat = FloatArray(n * d)
-        for (i in 0 until n) System.arraycopy(data[i], 0, flat, i * d, d)
         return OnnxTensor.createTensor(
             env,
-            java.nio.FloatBuffer.wrap(flat),
-            longArrayOf(1L, n.toLong(), d.toLong())
+            java.nio.FloatBuffer.wrap(flatData),
+            longArrayOf(1L, numEmbeddings.toLong(), embeddingSize.toLong())
         )
     }
 
@@ -552,7 +558,7 @@ class PocketTtsExecutor(
         return tensor
     }
 
-    private fun computeVoiceEmbeddings(encoder: OrtSession): Array<FloatArray> {
+    private fun computeVoiceEmbeddings(encoder: OrtSession): FloatArray {
         val voicePath = Paths.get(modelsPath).resolve(voice).absolutePathString()
         val file = File(voicePath)
 
@@ -597,33 +603,38 @@ class PocketTtsExecutor(
 
         val tensor = OnnxTensor.createTensor(env, java.nio.FloatBuffer.wrap(data), shape)
 
-        val inputs = mapOf("audio" to tensor)
+        val inputs = mapOf(KEY_AUDIO to tensor)
         val results = encoder.run(inputs)
 
-        val embeddings: Array<FloatArray> = when (val outVal = results[0].value) {
+        val embeddings: FloatArray = when (val outVal = results[0].value) {
             is Array<*> -> {
                 when (val first = outVal[0]) {
                     is Array<*> -> {
-                        val inner = first as Array<FloatArray>
+                        val inner = first
                         val n = inner.size
-                        if (n == 0) return Array(0) { FloatArray(0) }
+                        if (n == 0) return FloatArray(0)
 
-                        Array(n) { inner[it].copyOf() } // Use copyOf for array duplication
+                        FloatArray(n * VOICE_EMBEDDING_SIZE).apply {
+                            for (i in inner.indices) {
+                                System.arraycopy(inner[i], 0, this, i * 1024, 1024)
+                            }
+                        }
                     }
-                    is FloatArray -> arrayOf(first)
-                    else -> Array(0) { FloatArray(0) }
+                    is FloatArray -> first
+                    else -> FloatArray(0)
                 }
             }
             is java.nio.FloatBuffer -> {
                 val buf = outVal
                 buf.rewind()
                 val total = buf.remaining()
-                val dims = total / 1024
-                if (total % 1024 != 0) return Array(0) { FloatArray(0) }
+                if (total % VOICE_EMBEDDING_SIZE != 0) return FloatArray(0)
 
-                Array(dims) { FloatArray(1024).also { buf.get(it) } }
+                FloatArray(total).also { array ->
+                    buf.get(array)
+                }
             }
-            else -> Array(0) { FloatArray(0) }
+            else -> FloatArray(0)
         }
 
         results.close()
@@ -633,6 +644,7 @@ class PocketTtsExecutor(
     }
 
     private companion object {
+        const val KEY_AUDIO = "audio"
         const val KEY_SEQUENCE = "sequence"
         const val KEY_TOKEN_IDS = "token_ids"
         const val KEY_TEXT_EMBEDDINGS = "text_embeddings"
@@ -647,6 +659,7 @@ class PocketTtsExecutor(
         const val STATE_PREFIX = "state_"
         const val OUT_STATE_PREFIX = "out_state_"
 
+        const val VOICE_EMBEDDING_SIZE = 1024
         const val FRAME_SIZE = 32L
         const val MAX_FRAMES = 500
         const val DECODE_CHUNK_SIZE = 12

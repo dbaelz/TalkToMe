@@ -1,8 +1,8 @@
 # Talk To Me
 Talk To Me is a Spring Boot application that takes a text and creates an audio file from it using [ONNX Runtime](https://onnxruntime.ai/) and a text-to-speech model.
-It provides a very simple REST API for clients to submit text and retrieve generated audio files.
+It provides a very simple REST API for clients to submit text (with a config and a provider) and download the generated audio files.
 
-The project is a proof of concept and is currently in early development. Therefore, the main goal is to try out the ONNX Runtime, how to implement support for (different) TTS engines.
+The project is a proof of concept and is currently in early development. Therefore, the main goal is to try out the ONNX Runtimeand how to implement support for (different) TTS engines.
 It's not performance-optimized, but rather focused on getting a working prototype up and running for experiments.
 
 ## Features
@@ -11,7 +11,7 @@ It's not performance-optimized, but rather focused on getting a working prototyp
 - Waveform sampling and helper utilities for audio processing
 - Local storage of generated audio (`storage/`)
 
-### Models/Providers
+### Models/Engines
 Currently only [Pocket TTS](https://huggingface.co/kyutai/pocket-tts) with exported [ONNX models](https://huggingface.co/KevinAHM/pocket-tts-onnx) is supported.
 The models can be placed anywhere on the filesystem, but the default path is `models/pocket-tts/` (configurable via `application.properties`).
 
