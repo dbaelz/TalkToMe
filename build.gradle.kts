@@ -29,6 +29,9 @@ dependencies {
     implementation("io.github.eix128:sentencepiece4j:1.0.2")
     implementation("com.microsoft.onnxruntime:onnxruntime_gpu:1.24.3")
 
+    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    runtimeOnly("com.h2database:h2")
+
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

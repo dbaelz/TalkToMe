@@ -1,6 +1,6 @@
 package de.dbaelz.ttm.controller
 
-import de.dbaelz.ttm.model.TtsJob
+import de.dbaelz.ttm.model.TtsJobEntity
 import de.dbaelz.ttm.repository.JobRepository
 import de.dbaelz.ttm.service.StorageService
 import org.hamcrest.Matchers.notNullValue
@@ -110,8 +110,8 @@ class TtsControllerTest @Autowired constructor(
 
     @Test
     fun `getJob - success`() {
-        val job = TtsJob(id = "job2", text = "Hello there", createdAt = Instant.now())
-        jobRepository.save(job)
+        val jobEntity = TtsJobEntity(id = "job2", text = "Hello there", createdAt = Instant.now())
+        jobRepository.save(jobEntity)
 
         mockMvc.perform(
             get("/api/tts/jobs/job2")

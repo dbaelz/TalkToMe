@@ -3,7 +3,10 @@ package de.dbaelz.ttm.service
 import de.dbaelz.ttm.model.JobStatus
 import de.dbaelz.ttm.model.TtsEngine
 import de.dbaelz.ttm.model.TtsJob
+import de.dbaelz.ttm.model.TtsJobEntity
 import de.dbaelz.ttm.repository.JobRepository
+import de.dbaelz.ttm.repository.toEntity
+import de.dbaelz.ttm.repository.toTtsJob
 import de.dbaelz.ttm.tts.TtsConfig
 import de.dbaelz.ttm.tts.pocket.PocketTtsExecutor
 import org.slf4j.LoggerFactory
@@ -23,7 +26,7 @@ class DefaultTtsService(
     override fun generate(text: String, config: TtsConfig, engine: TtsEngine): TtsJob {
         val id = UUID.randomUUID().toString()
         val job = TtsJob(id = id, text = text, config = config, engine = engine)
-        repo.save(job)
+        repo.save(job.toEntity())
 
         executor.execute {
             process(engine, job)
@@ -35,7 +38,10 @@ class DefaultTtsService(
     private fun process(engine: TtsEngine, job: TtsJob) {
         try {
             job.status = JobStatus.RUNNING
-            repo.save(job)
+            updateJob(job) { entity ->
+                entity.status = JobStatus.RUNNING
+                entity
+            }
 
             logger.info("Executing $job with engine ${engine.name}")
 
@@ -48,14 +54,30 @@ class DefaultTtsService(
             val fileId = storage.save(audio)
             job.fileId = fileId
             job.status = JobStatus.DONE
-            repo.save(job)
+            updateJob(job, { entity ->
+                entity.fileId = fileId
+                entity.status = JobStatus.DONE
+                entity
+            })
         } catch (_: Exception) {
             job.status = JobStatus.FAILED
-            repo.save(job)
+            updateJob(job) { entity ->
+                entity.status = JobStatus.FAILED
+                entity
+            }
         }
     }
 
-    override fun getJob(id: String): TtsJob? = repo.findById(id)
+    private fun updateJob(job: TtsJob, onUpdate: (TtsJobEntity) -> TtsJobEntity) {
+        repo.findById(job.id).ifPresentOrElse({ entity ->
+            onUpdate(entity)
+            repo.save(entity)
+        }, {
+            repo.save(job.toEntity())
+        })
+    }
+
+    override fun getJob(id: String): TtsJob? = repo.findById(id).map { it.toTtsJob() }.orElse(null)
 
     override fun getFile(id: String): ByteArray? = storage.load(id)
 }
