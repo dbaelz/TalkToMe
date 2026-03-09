@@ -4,12 +4,11 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.io.File
 import java.nio.file.Files
-import java.util.UUID
+import java.util.*
 
 @Service
 class LocalStorageService(
-    @Value("\${storage.path:storage}")
-    private val basePath: String
+    @Value("\${storage.path:storage}") private val basePath: String
 ) : StorageService {
     init {
         Files.createDirectories(File(basePath).toPath())
@@ -25,5 +24,10 @@ class LocalStorageService(
     override fun load(id: String, extension: String): ByteArray? {
         val file = File(basePath, "${id}.$extension")
         return if (file.exists()) file.readBytes() else null
+    }
+
+    override fun exists(id: String, extension: String): Boolean {
+        val file = File(basePath, "${id}.$extension")
+        return file.exists()
     }
 }

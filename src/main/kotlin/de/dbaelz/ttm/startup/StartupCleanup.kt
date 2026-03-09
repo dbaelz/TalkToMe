@@ -18,17 +18,43 @@ class StartupCleanup(
     @EventListener(ApplicationReadyEvent::class)
     fun onApplicationReady() {
         var removed = 0
-        repo.findAll().forEach { entity ->
-            if (entity.status == JobStatus.DONE && entity.fileId != null) {
-                val fileExists = storage.load(entity.fileId!!) != null
-                if (!fileExists) {
-                    repo.deleteById(entity.id)
-                    removed++
-                    logger.info("Removed job ${entity.id} because file ${entity.fileId} is missing")
+        repo.findAll().asSequence()
+            .forEach { entity ->
+                when (entity.status) {
+                    JobStatus.FAILED -> {
+                        repo.deleteById(entity.id)
+                        removed++
+                        logger.info("Removed FAILED job ${entity.id}")
+                    }
+
+                    JobStatus.DONE if entity.fileId != null -> {
+                        when (fileExists(entity.fileId!!)) {
+                            true -> {}
+
+                            false -> {
+                                repo.deleteById(entity.id)
+                                removed++
+                                logger.info("Removed job ${entity.id} because file ${entity.fileId} is missing")
+                            }
+
+                            null -> {
+                                logger.warn("File exists check failed for file ${entity.fileId} of job ${entity.id}")
+                            }
+                        }
+                    }
+
+                    else -> {}
                 }
             }
-        }
+
         logger.info("Startup cleanup completed. Removed $removed jobs.")
     }
-}
 
+    private fun fileExists(fileId: String): Boolean? {
+        return try {
+            storage.exists(fileId)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+}
