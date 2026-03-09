@@ -3,6 +3,7 @@ package de.dbaelz.ttm.controller
 import de.dbaelz.ttm.model.TtsJobEntity
 import de.dbaelz.ttm.repository.JobRepository
 import de.dbaelz.ttm.service.StorageService
+import org.hamcrest.Matchers.hasItems
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -120,6 +121,42 @@ class TtsControllerTest @Autowired constructor(
             .andExpect(status().isOk)
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.id").value("job2"))
+    }
+
+    @Test
+    fun `getAllJobs - success returns list`() {
+        jobRepository.deleteAll()
+        val a = TtsJobEntity(id = "jobA", text = "A", createdAt = Instant.now())
+        val b = TtsJobEntity(id = "jobB", text = "B", createdAt = Instant.now())
+        jobRepository.saveAll(listOf(a, b))
+
+        mockMvc.perform(
+            get("/api/tts/jobs")
+                .header("Authorization", authHeader)
+        )
+            .andExpect(status().isOk)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$[*].id").value(hasItems("jobA", "jobB")))
+    }
+
+    @Test
+    fun `getAllJobs - success returns empty list`() {
+        jobRepository.deleteAll()
+
+        mockMvc.perform(
+            get("/api/tts/jobs")
+                .header("Authorization", authHeader)
+        )
+            .andExpect(status().isOk)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$").isArray)
+            .andExpect(jsonPath("$").isEmpty)
+    }
+
+    @Test
+    fun `getAllJobs - unauthorized when missing credentials`() {
+        mockMvc.perform(get("/api/tts/jobs"))
+            .andExpect(status().isUnauthorized)
     }
 
     @Test

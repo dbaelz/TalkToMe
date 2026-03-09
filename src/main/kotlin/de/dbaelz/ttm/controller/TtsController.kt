@@ -36,6 +36,12 @@ class TtsController(private val ttsService: TtsService) {
         return ResponseEntity.accepted().body(job)
     }
 
+    @GetMapping("/jobs")
+    fun getAllJobs(): ResponseEntity<List<TtsJob>> {
+        return ResponseEntity.ok(ttsService.getAllJobs())
+    }
+
+
     @GetMapping("/jobs/{id}")
     fun getJob(@PathVariable id: String): ResponseEntity<TtsJob> {
         val job = ttsService.getJob(id) ?: return ResponseEntity.notFound().build()

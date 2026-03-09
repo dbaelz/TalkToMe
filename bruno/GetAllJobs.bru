@@ -1,11 +1,11 @@
 meta {
-  name: Download File
+  name: Get All Jobs
   type: http
-  seq: 4
+  seq: 2
 }
 
 get {
-  url: {{host}}/tts/files/{{file_id}}
+  url: {{host}}/tts/jobs
   auth: basic
 }
 
@@ -13,3 +13,4 @@ auth:basic {
   username: {{auth_username}}
   password: {{auth_password}}
 }
+

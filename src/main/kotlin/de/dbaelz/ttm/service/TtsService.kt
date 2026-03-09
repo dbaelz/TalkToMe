@@ -12,5 +12,6 @@ interface TtsService {
     ): TtsJob
 
     fun getJob(id: String): TtsJob?
+    fun getAllJobs(): List<TtsJob>
     fun getFile(id: String): ByteArray?
 }

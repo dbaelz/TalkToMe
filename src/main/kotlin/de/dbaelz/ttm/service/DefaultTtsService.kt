@@ -79,5 +79,7 @@ class DefaultTtsService(
 
     override fun getJob(id: String): TtsJob? = repo.findById(id).map { it.toTtsJob() }.orElse(null)
 
+    override fun getAllJobs(): List<TtsJob> = repo.findAll().map { it.toTtsJob() }.toList()
+
     override fun getFile(id: String): ByteArray? = storage.load(id)
 }
