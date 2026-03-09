@@ -10,6 +10,8 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.util.*
 import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorService
+import jakarta.annotation.PreDestroy
 
 @Service
 class DefaultTtsService(
@@ -18,7 +20,7 @@ class DefaultTtsService(
     private val pocketTtsExecutor: PocketTtsExecutor,
 ) : TtsService {
     private val logger = LoggerFactory.getLogger(DefaultTtsService::class.java)
-    private val executor = Executors.newFixedThreadPool(2)
+    private val executor: ExecutorService = Executors.newFixedThreadPool(2)
 
     override fun generate(text: String, config: TtsConfig, engine: TtsEngine): TtsJob {
         val id = UUID.randomUUID().toString()
@@ -58,4 +60,14 @@ class DefaultTtsService(
     override fun getJob(id: String): TtsJob? = repo.findById(id)
 
     override fun getFile(id: String): ByteArray? = storage.load(id)
+
+    @PreDestroy
+    fun shutdown() {
+        logger.info("Shutting down DefaultTtsService executor")
+        try {
+            executor.shutdownNow()
+        } catch (e: Exception) {
+            logger.warn("Exception while shutting down executor", e)
+        }
+    }
 }

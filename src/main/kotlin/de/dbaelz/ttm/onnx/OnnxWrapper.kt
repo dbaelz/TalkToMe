@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component
 import java.nio.file.Paths
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.absolutePathString
+import jakarta.annotation.PreDestroy
 
 @Component
 class OnnxWrapper(
@@ -75,6 +76,17 @@ class OnnxWrapper(
     fun getModel(engine: TtsEngine, fileName: String): OrtSession {
         return sessions[ModelFileKey(engine, fileName)]
             ?: throw IllegalArgumentException("Model file not loaded: $fileName for $engine")
+    }
+
+    @PreDestroy
+    fun shutdown() {
+        logger.info("Shutting down OnnxWrapper: closing ${sessions.size} sessions and environment")
+        val snapshot = sessions.values.toList()
+        snapshot.forEach { session ->
+            runCatching { session.close() }
+        }
+        sessions.clear()
+        runCatching { env.close() }
     }
 
     data class ModelFileKey(val engine: TtsEngine, val fileName: String)
