@@ -13,8 +13,9 @@ class SentencePieceTokenizer(
     @Value("\${tts.models.pocket-tts}") private val modelsPath: String,
     @Value("\${tts.models.pocket-tts.tokenizer}") private val fileName: String
 ) {
-    private val tokenizer =
+    private val tokenizer: Model by lazy {
         Model.parseFrom(Paths.get(modelsPath).resolve(fileName))
+    }
     private val algorithm = SentencePieceAlgorithm(true, Scoring.HIGHEST_SCORE)
 
 
