@@ -1,33 +1,31 @@
 package de.dbaelz.ttm.service
 
 import de.dbaelz.ttm.model.JobStatus
-import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.model.TtsEngine
+import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.repository.JobRepository
 import de.dbaelz.ttm.tts.TtsConfig
 import de.dbaelz.ttm.tts.pocket.PocketTtsExecutor
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.util.*
-import java.util.concurrent.Executors
-import java.util.concurrent.ExecutorService
-import jakarta.annotation.PreDestroy
+import java.util.concurrent.Executor
 
 @Service
 class DefaultTtsService(
     private val storage: StorageService,
     private val repo: JobRepository,
     private val pocketTtsExecutor: PocketTtsExecutor,
+    private val executor: Executor,
 ) : TtsService {
     private val logger = LoggerFactory.getLogger(DefaultTtsService::class.java)
-    private val executor: ExecutorService = Executors.newFixedThreadPool(2)
 
     override fun generate(text: String, config: TtsConfig, engine: TtsEngine): TtsJob {
         val id = UUID.randomUUID().toString()
         val job = TtsJob(id = id, text = text, config = config, engine = engine)
         repo.save(job)
 
-        executor.submit {
+        executor.execute {
             process(engine, job)
         }
 
@@ -60,14 +58,4 @@ class DefaultTtsService(
     override fun getJob(id: String): TtsJob? = repo.findById(id)
 
     override fun getFile(id: String): ByteArray? = storage.load(id)
-
-    @PreDestroy
-    fun shutdown() {
-        logger.info("Shutting down DefaultTtsService executor")
-        try {
-            executor.shutdownNow()
-        } catch (e: Exception) {
-            logger.warn("Exception while shutting down executor", e)
-        }
-    }
 }
