@@ -17,23 +17,19 @@ import java.nio.ByteOrder
 import java.nio.LongBuffer
 import java.nio.file.Paths
 import java.util.*
-import kotlin.collections.get
-import kotlin.compareTo
 import kotlin.io.path.absolutePathString
 import kotlin.math.min
 import kotlin.math.sqrt
-import kotlin.run
-import kotlin.times
 
 @Service
 class PocketTtsExecutor(
-    @Value($$"${tts.models.pocket-tts}") private val modelsPath: String,
-    @Value($$"${tts.models.pocket-tts.encoder}") private val encoder: String,
-    @Value($$"${tts.models.pocket-tts.text_conditioner}") private val textConditioner: String,
-    @Value($$"${tts.models.pocket-tts.flow_lm_main}") private val lmMain: String,
-    @Value($$"${tts.models.pocket-tts.flow_lm_flow}") private val lmFlow: String,
-    @Value($$"${tts.models.pocket-tts.decoder}") private val decoder: String,
-    @Value($$"${tts.models.pocket-tts.voice}") private val voice: String,
+    @Value($$"${tts.models.pocket-tts:models/pocket-tts}") private val modelsPath: String,
+    @Value($$"${tts.models.pocket-tts.encoder:mimi_encoder.onnx}") private val encoder: String,
+    @Value($$"${tts.models.pocket-tts.text_conditioner:text_conditioner.onnx}") private val textConditioner: String,
+    @Value($$"${tts.models.pocket-tts.flow_lm_main:flow_lm_main_int8.onnx}") private val lmMain: String,
+    @Value($$"${tts.models.pocket-tts.flow_lm_flow:flow_lm_flow_int8.onnx}") private val lmFlow: String,
+    @Value($$"${tts.models.pocket-tts.decoder:mimi_decoder_int8.onnx}") private val decoder: String,
+    @Value($$"${tts.models.pocket-tts.voice:voice.wav}") private val voice: String,
     private val tokenizer: SentencePieceTokenizer,
     private val onnx: OnnxWrapper,
     private val waveformSampler: WaveformSampler
@@ -374,6 +370,7 @@ class PocketTtsExecutor(
                             for (it in input) sum += countElems(it)
                             sum
                         }
+
                         else -> 0
                     }
                 }
@@ -392,6 +389,7 @@ class PocketTtsExecutor(
                             System.arraycopy(input, 0, out, idx[0], input.size)
                             idx[0] += input.size
                         }
+
                         is Array<*> -> input.forEach { fill(it) }
                     }
                 }

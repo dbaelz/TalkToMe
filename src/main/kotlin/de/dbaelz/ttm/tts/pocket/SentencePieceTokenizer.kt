@@ -10,8 +10,8 @@ import java.nio.file.Paths
 
 @Component
 class SentencePieceTokenizer(
-    @Value("\${tts.models.pocket-tts}") private val modelsPath: String,
-    @Value("\${tts.models.pocket-tts.tokenizer}") private val fileName: String
+    @Value("\${tts.models.pocket-tts:models/pocket-tts}") private val modelsPath: String,
+    @Value("\${tts.models.pocket-tts.tokenizer:tokenizer.model}") private val fileName: String
 ) {
     private val tokenizer: Model by lazy {
         Model.parseFrom(Paths.get(modelsPath).resolve(fileName))
