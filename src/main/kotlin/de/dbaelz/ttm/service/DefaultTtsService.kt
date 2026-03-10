@@ -8,6 +8,7 @@ import de.dbaelz.ttm.repository.JobRepository
 import de.dbaelz.ttm.repository.toEntity
 import de.dbaelz.ttm.repository.toTtsJob
 import de.dbaelz.ttm.tts.TtsConfig
+import de.dbaelz.ttm.tts.chatterbox.ChatterboxTtsExecutor
 import de.dbaelz.ttm.tts.pocket.PocketTtsExecutor
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -19,6 +20,7 @@ class DefaultTtsService(
     private val storage: StorageService,
     private val repo: JobRepository,
     private val pocketTtsExecutor: PocketTtsExecutor,
+    private val chatterboxTtsExecutor: ChatterboxTtsExecutor,
     private val executor: Executor,
 ) : TtsService {
     private val logger = LoggerFactory.getLogger(DefaultTtsService::class.java)
@@ -43,13 +45,14 @@ class DefaultTtsService(
                 entity
             }
 
-            logger.info("Executing $job with engine ${engine.name}")
+            logger.info("Execute $job with engine ${engine.name}")
 
             val audio = when (engine) {
                 TtsEngine.POCKET -> pocketTtsExecutor(job)
+                TtsEngine.CHATTERBOX -> chatterboxTtsExecutor(job)
             }
 
-            logger.info("Executed $job, audio size: ${audio.size} bytes")
+            logger.info("Finished $job, audio size: ${audio.size} bytes")
 
             val fileId = storage.save(audio)
             job.fileId = fileId
@@ -59,7 +62,8 @@ class DefaultTtsService(
                 entity.status = JobStatus.DONE
                 entity
             })
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            logger.info("Failed $job", e)
             job.status = JobStatus.FAILED
             updateJob(job) { entity ->
                 entity.status = JobStatus.FAILED

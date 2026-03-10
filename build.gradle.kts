@@ -27,6 +27,7 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
 
     implementation("io.github.eix128:sentencepiece4j:1.0.2")
+    implementation("ai.djl.huggingface:tokenizers:0.36.0")
     implementation("com.microsoft.onnxruntime:onnxruntime_gpu:1.24.3")
 
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")

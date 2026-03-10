@@ -7,18 +7,26 @@ It's not performance-optimized, but rather focused on getting a working prototyp
 
 ## Features
 - Text-to-speech conversion using ONNX Runtime with GPU (CUDA) and CPU support. GPU is only supported for Windows x64 and Linux x64. See [documentation](https://onnxruntime.ai/docs/get-started/with-java.html)
-- Base structure to support multiple TTS Engines. Currently only Pocket TTS is implemented
+- Base structure to support multiple TTS Engines. Currently Pocket TTS and Chatterbox are implemented
 - Most application settings are configurable. See [application.properties](src/main/resources/application.properties) for details
 - Generated Audio files are saved at local storage (default path: `storage/`)
 
 
-## Getting started 
-Currently only [Pocket TTS](https://huggingface.co/kyutai/pocket-tts) with [this ONNX models](https://huggingface.co/KevinAHM/pocket-tts-onnx) is supported.
+## Getting started
+Support TTS engines:
+- [Pocket TTS](https://huggingface.co/kyutai/pocket-tts) with [this ONNX models](https://huggingface.co/KevinAHM/pocket-tts-onnx)
+- [Chatterbox](https://huggingface.co/ResembleAI/chatterbox) with [onnx-community/chatterbox-onnx](https://huggingface.co/onnx-community/chatterbox-onnx)
 
 ### Required files
+Pocket TTS:
 - ONNX files: INT8 or FP32 versions of `flow_lm_flow` and `flow_lm_main`. The `mimi_decoder.onnx`, `mimi_encoder.onnx` and `text_conditioner.onnx`
-- `tokenizer.model` file for the SentencePiece tokenizer
-- WAV file for the voice cloning. This should be a WAV file with a sample rate of 24000 Hz, mono channel, and 16-bit depth and a duration of around 10 seconds. In my tests the `reference_sample.wav` (16000 Hz, mono) provided in the HuggingFace repository wasn't ideal. So I recommend using a custom file with the specifications. 
+- Tokenizer files: `tokenizer.model` file for the SentencePiece tokenizer
+- WAV file for the voice cloning. This should be a WAV file with a sample rate of 24000 Hz, mono channel, and 16-bit depth and a duration of around 10 seconds. In my tests the `reference_sample.wav` (16000 Hz, mono) provided in the HuggingFace repository wasn't ideal. So I recommend using a custom file with the specifications.
+
+Chatterbox:
+- ONNX files: `speech_encoder.onnx`, `speech_encoder.onnx_data`, `embed_tokens.onnx`, `embed_tokens.onnx_data`, `language_model.onnx`, `language_model.onnx_data`, `conditional_decoder.onnx`, `conditional_decoder.onnx_data`
+- Tokenizer files: `tokenizer.json` (required) and `tokenizer_config.json` (recommended)
+- WAV file for the voice cloning (`voice.wav` by default)
 
 ### Configuration and running
 - Settings like address/port, basic auth, model path, model filenames or GPU support can be configured in [application.properties](src/main/resources/application.properties)

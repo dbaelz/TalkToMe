@@ -16,5 +16,6 @@ data class TtsJob(
 enum class JobStatus { PENDING, RUNNING, DONE, FAILED }
 
 enum class TtsEngine {
-    POCKET
+    POCKET,
+    CHATTERBOX
 }
