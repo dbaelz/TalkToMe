@@ -1,7 +1,7 @@
 meta {
-  name: Generate Audio
+  name: Generate Chatterbox
   type: http
-  seq: 1
+  seq: 3
 }
 
 post {
@@ -19,10 +19,8 @@ body:json {
   {
     "text": "Hello listener, how are you?",
     "config": {
-      "steps": 10,
-      "temperature": 0.5,
-      "seed": 0
+      "exaggeration": 0.5
     },
-    "engine": "POCKET"
+    "engine": "CHATTERBOX"
   }
 }

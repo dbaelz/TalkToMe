@@ -1,6 +1,6 @@
 package de.dbaelz.ttm.repository
 
 import de.dbaelz.ttm.model.TtsJobEntity
-import org.springframework.data.repository.CrudRepository
+import org.springframework.data.jpa.repository.JpaRepository
 
-interface JobRepository : CrudRepository<TtsJobEntity, String>
+interface JobRepository : JpaRepository<TtsJobEntity, String>

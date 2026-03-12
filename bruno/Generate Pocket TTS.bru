@@ -1,0 +1,28 @@
+meta {
+  name: Generate Pocket TTS
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{host}}/tts
+  body: json
+  auth: basic
+}
+
+auth:basic {
+  username: {{auth_username}}
+  password: {{auth_password}}
+}
+
+body:json {
+  {
+    "text": "Hello listener, how are you?",
+    "config": {
+      "steps": 10,
+      "temperature": 0.5,
+      "seed": 0
+    },
+    "engine": "POCKET"
+  }
+}

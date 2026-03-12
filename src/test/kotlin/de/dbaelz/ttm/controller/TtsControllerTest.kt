@@ -19,6 +19,10 @@ import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.*
 import de.dbaelz.ttm.TestConfig
+import de.dbaelz.ttm.model.ChatterboxConfigEntity
+import de.dbaelz.ttm.model.PocketTtsConfigEntity
+import de.dbaelz.ttm.repository.ChatterboxConfigRepository
+import de.dbaelz.ttm.repository.PocketTtsConfigRepository
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -33,12 +37,18 @@ class TtsControllerTest @Autowired constructor(
     @Autowired
     lateinit var storageService: StorageService
 
+    @Autowired
+    lateinit var pocketConfigRepository: PocketTtsConfigRepository
+
+    @Autowired
+    lateinit var chatterboxConfigRepository: ChatterboxConfigRepository
+
     private val authHeader: String =
         "Basic " + Base64.getEncoder().encodeToString("user:password".toByteArray())
 
     @Test
     fun `generateAudio - success`() {
-        val request = mapOf("text" to "Hello")
+        val request = mapOf("text" to "Hello", "config" to mapOf("steps" to 1, "temperature" to 0.5, "seed" to 0))
 
         mockMvc.perform(
             post("/api/tts")
@@ -54,7 +64,7 @@ class TtsControllerTest @Autowired constructor(
 
     @Test
     fun `generateAudio - with engine - success`() {
-        val request = mapOf("text" to "Hello", "engine" to "pocket")
+        val request = mapOf("text" to "Hello", "engine" to "pocket", "config" to mapOf("steps" to 2, "temperature" to 0.6, "seed" to 0))
 
         mockMvc.perform(
             post("/api/tts")
@@ -71,7 +81,7 @@ class TtsControllerTest @Autowired constructor(
 
     @Test
     fun `generateAudio - with invalid engine - bad request`() {
-        val request = mapOf("text" to "Hello", "engine" to "invalid")
+        val request = mapOf("text" to "Hello", "engine" to "invalid", "config" to mapOf("steps" to 2))
 
         mockMvc.perform(
             post("/api/tts")
@@ -136,6 +146,30 @@ class TtsControllerTest @Autowired constructor(
             .andExpect(status().isOk)
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$[*].id").value(hasItems("jobA", "jobB")))
+    }
+
+    @Test
+    fun `getAllJobs - success includes engine configs when present`() {
+        jobRepository.deleteAll()
+        pocketConfigRepository.deleteAll()
+        chatterboxConfigRepository.deleteAll()
+
+        val jobA = TtsJobEntity(id = "jobA", text = "A", createdAt = Instant.now(), engine = de.dbaelz.ttm.model.TtsEngine.CHATTERBOX)
+        val jobB = TtsJobEntity(id = "jobB", text = "B", createdAt = Instant.now(), engine = de.dbaelz.ttm.model.TtsEngine.POCKET)
+        jobRepository.saveAll(listOf(jobA, jobB))
+
+        val chatter = ChatterboxConfigEntity(job = jobA, exaggeration = 0.75f)
+        val pocket = PocketTtsConfigEntity(job = jobB, steps = 4, temperature = 0.6f, seed = 2)
+        chatterboxConfigRepository.save(chatter)
+        pocketConfigRepository.save(pocket)
+
+        mockMvc.perform(
+            get("/api/tts/jobs").header("Authorization", authHeader)
+        )
+            .andExpect(status().isOk)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$[?(@.id=='jobA')].config.exaggeration").exists())
+            .andExpect(jsonPath("$[?(@.id=='jobB')].config.steps").exists())
     }
 
     @Test

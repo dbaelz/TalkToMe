@@ -1,11 +1,12 @@
 meta {
   name: Get Job
   type: http
-  seq: 3
+  seq: 5
 }
 
 get {
   url: {{host}}/tts/jobs/{{job_id}}
+  body: none
   auth: basic
 }
 

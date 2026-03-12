@@ -1,7 +1,9 @@
 package de.dbaelz.ttm.controller
 
-import de.dbaelz.ttm.model.TtsJob
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.ObjectMapper
 import de.dbaelz.ttm.model.TtsEngine
+import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.service.TtsService
 import de.dbaelz.ttm.tts.TtsConfig
 import org.springframework.http.ResponseEntity
@@ -9,30 +11,76 @@ import org.springframework.web.bind.annotation.*
 
 @RestController
 @RequestMapping("/api/tts")
-class TtsController(private val ttsService: TtsService) {
+class TtsController(
+    private val ttsService: TtsService,
+    private val mapper: ObjectMapper
+) {
 
-    data class GenerateRequest(val text: String?, val config: TtsConfig? = null, val engine: String? = null)
+    data class GenerateRequest(
+        val text: String?,
+        val config: JsonNode? = null,
+        val engine: String? = null
+    )
 
     @PostMapping
     fun generateAudio(@RequestBody request: GenerateRequest): ResponseEntity<Any> {
         val text = request.text ?: return ResponseEntity.badRequest().build()
-        val engineName = request.engine?.trim()?.takeIf { it.isNotEmpty() }
-        val engine = if (engineName != null) {
-            try {
-                TtsEngine.valueOf(engineName.uppercase())
-            } catch (_: IllegalArgumentException) {
-                val body = mapOf(
-                    "error" to "INVALID_ENGINE",
-                    "message" to "Engine '$engineName' is not supported",
-                    "allowedEngines" to TtsEngine.entries.map { it.name }
-                )
-                return ResponseEntity.badRequest().body(body)
+
+        val engine = request.engine?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let {
+                try {
+                    TtsEngine.valueOf(it.uppercase())
+                } catch (_: IllegalArgumentException) {
+                    return ResponseEntity.badRequest().body(
+                        mapOf(
+                            "error" to "INVALID_ENGINE",
+                            "message" to "Engine '$it' is not supported",
+                            "allowedEngines" to TtsEngine.entries.map { e -> e.name }
+                        )
+                    )
+                }
             }
-        } else {
-            TtsEngine.POCKET
+            ?: TtsEngine.POCKET
+
+        val configNode = request.config ?: return ResponseEntity.badRequest().body(
+            mapOf("error" to "MISSING_CONFIG", "message" to "Request must include a 'config' object for the chosen engine")
+        )
+
+        val config: TtsConfig = try {
+            when (engine) {
+                TtsEngine.POCKET -> mapper.treeToValue(configNode, de.dbaelz.ttm.tts.PocketTtsConfig::class.java)
+                TtsEngine.CHATTERBOX -> mapper.treeToValue(configNode, de.dbaelz.ttm.tts.ChatterboxConfig::class.java)
+            }
+        } catch (e: Exception) {
+            return ResponseEntity.badRequest().body(mapOf("error" to "INVALID_CONFIG_JSON", "message" to e.message))
         }
 
-        val job = ttsService.generate(text, request.config ?: TtsConfig(), engine)
+        when (engine) {
+            TtsEngine.POCKET -> {
+                val pocket = config as? de.dbaelz.ttm.tts.PocketTtsConfig ?: return ResponseEntity.badRequest().body(
+                    mapOf("error" to "INVALID_CONFIG_TYPE", "message" to "Expected PocketTtsConfig for engine POCKET")
+                )
+                val errors = mutableListOf<String>()
+                if (pocket.steps <= 0) errors.add("steps must be > 0")
+                if (pocket.seed < 0) errors.add("seed must be >= 0")
+                if (errors.isNotEmpty()) {
+                    return ResponseEntity.badRequest().body(mapOf("error" to "INVALID_CONFIG", "messages" to errors))
+                }
+            }
+
+            TtsEngine.CHATTERBOX -> {
+                val chatter = config as? de.dbaelz.ttm.tts.ChatterboxConfig ?: return ResponseEntity.badRequest().body(
+                    mapOf("error" to "INVALID_CONFIG_TYPE", "message" to "Expected ChatterboxConfig for engine CHATTERBOX")
+                )
+                val errors = mutableListOf<String>()
+                if (chatter.exaggeration < 0) errors.add("exaggeration must be >= 0")
+                if (errors.isNotEmpty()) {
+                    return ResponseEntity.badRequest().body(mapOf("error" to "INVALID_CONFIG", "messages" to errors))
+                }
+            }
+        }
+
+        val job = ttsService.generate(text, config, engine)
         return ResponseEntity.accepted().body(job)
     }
 

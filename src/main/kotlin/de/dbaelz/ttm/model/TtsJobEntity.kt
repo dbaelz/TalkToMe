@@ -1,6 +1,5 @@
 package de.dbaelz.ttm.model
 
-import de.dbaelz.ttm.tts.TtsConfig
 import jakarta.persistence.*
 import java.time.Instant
 
@@ -13,10 +12,6 @@ class TtsJobEntity(
 
     @Column(name = "text", nullable = false, columnDefinition = "TEXT")
     var text: String = "",
-
-    @Convert(converter = TtsConfigConverter::class)
-    @Column(name = "config", nullable = false, columnDefinition = "TEXT")
-    var config: TtsConfig = TtsConfig(),
 
     @Enumerated(EnumType.STRING)
     @Column(name = "engine", nullable = false)
@@ -31,4 +26,10 @@ class TtsJobEntity(
 
     @Column(name = "file_id")
     var fileId: String? = null
-)
+) {
+    @OneToOne(mappedBy = "job", cascade = [CascadeType.ALL], orphanRemoval = true)
+    var pocketConfig: PocketTtsConfigEntity? = null
+
+    @OneToOne(mappedBy = "job", cascade = [CascadeType.ALL], orphanRemoval = true)
+    var chatterboxConfig: ChatterboxConfigEntity? = null
+}

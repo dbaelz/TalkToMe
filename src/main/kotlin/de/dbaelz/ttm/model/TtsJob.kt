@@ -1,12 +1,13 @@
 package de.dbaelz.ttm.model
 
+import de.dbaelz.ttm.tts.PocketTtsConfig
 import de.dbaelz.ttm.tts.TtsConfig
 import java.time.Instant
 
 data class TtsJob(
     val id: String,
     val text: String,
-    val config: TtsConfig = TtsConfig(),
+    val config: TtsConfig = PocketTtsConfig(),
     val engine: TtsEngine = TtsEngine.POCKET,
     val createdAt: Instant = Instant.now(),
     var status: JobStatus = JobStatus.PENDING,

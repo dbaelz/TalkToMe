@@ -7,7 +7,7 @@ import de.dbaelz.ttm.audio.WaveformSampler
 import de.dbaelz.ttm.model.TtsEngine
 import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.onnx.OnnxWrapper
-import de.dbaelz.ttm.tts.TtsConfig
+import de.dbaelz.ttm.tts.PocketTtsConfig
 import de.dbaelz.ttm.tts.TtsExecutor
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -35,6 +35,8 @@ class PocketTtsExecutor(
     private val waveformSampler: WaveformSampler
 ) : TtsExecutor {
     override fun invoke(job: TtsJob): ByteArray {
+        if (job.config !is PocketTtsConfig) throw IllegalArgumentException("Invalid config type for PocketTtsExecutor")
+
         onnx.loadModelFiles(
             engine = TtsEngine.POCKET,
             modelsPath = modelsPath,
@@ -44,7 +46,7 @@ class PocketTtsExecutor(
         return generateAudio(job.text, job.config)
     }
 
-    private fun generateAudio(text: String, config: TtsConfig): ByteArray {
+    private fun generateAudio(text: String, config: PocketTtsConfig): ByteArray {
         val textConditionerModel = onnx.getModel(TtsEngine.POCKET, textConditioner)
         val lmMainModel = onnx.getModel(TtsEngine.POCKET, lmMain)
         val lmFlowModel = onnx.getModel(TtsEngine.POCKET, lmFlow)
@@ -203,7 +205,7 @@ class PocketTtsExecutor(
                 val audioOut = extractFloatArrayFromTensor(audioTensor)
                 val outLen = audioOut.size
                 if (audioPos + outLen > audioBuf.size) {
-                    var newCap = kotlin.math.max(audioBuf.size * 2, audioPos + outLen)
+                    val newCap = kotlin.math.max(audioBuf.size * 2, audioPos + outLen)
                     val newBuf = FloatArray(newCap)
                     System.arraycopy(audioBuf, 0, newBuf, 0, audioPos)
                     audioBuf = newBuf

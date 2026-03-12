@@ -1,11 +1,12 @@
 meta {
   name: Download File
   type: http
-  seq: 4
+  seq: 6
 }
 
 get {
   url: {{host}}/tts/files/{{file_id}}
+  body: none
   auth: basic
 }
 
