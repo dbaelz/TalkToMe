@@ -7,6 +7,7 @@ import de.dbaelz.ttm.audio.WaveformSampler
 import de.dbaelz.ttm.model.TtsEngine
 import de.dbaelz.ttm.model.TtsJob
 import de.dbaelz.ttm.onnx.OnnxWrapper
+import de.dbaelz.ttm.tts.ChatterboxConfig
 import de.dbaelz.ttm.tts.TtsExecutor
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -34,15 +35,17 @@ class ChatterboxTtsExecutor(
 ) : TtsExecutor {
 
     override fun invoke(job: TtsJob): ByteArray {
+        if (job.config !is ChatterboxConfig) throw IllegalArgumentException("Invalid config type for ChatterboxExecutor")
+
         onnx.loadModelFiles(
             engine = TtsEngine.CHATTERBOX,
             modelsPath = modelsPath,
             modelFiles = listOf(speechEncoder, embedTokens, languageModel, conditionalDecoder)
         )
-        return generateAudio(job.text)
+        return generateAudio(job.text, job.config)
     }
 
-    private fun generateAudio(text: String): ByteArray {
+    private fun generateAudio(text: String, config: ChatterboxConfig): ByteArray {
         val speechEncoderModel = onnx.getModel(TtsEngine.CHATTERBOX, speechEncoder)
         val embedTokensModel = onnx.getModel(TtsEngine.CHATTERBOX, embedTokens)
         val languageModelModel = onnx.getModel(TtsEngine.CHATTERBOX, languageModel)
@@ -65,12 +68,22 @@ class ChatterboxTtsExecutor(
         var speechTokensTensor: OnnxTensor? = null
 
         try {
-            embedInputs["input_ids"] = createLongTensor(env, inputIds, longArrayOf(1L, inputIds.size.toLong()))
+            embedInputs["input_ids"] =
+                createLongTensor(env, inputIds, longArrayOf(1L, inputIds.size.toLong()))
             embedInputs["position_ids"] = createInitialPositionIds(env, inputIds)
-            embedInputs["exaggeration"] = OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(0.5f)), longArrayOf(1L))
+            embedInputs["exaggeration"] =
+                OnnxTensor.createTensor(
+                    env,
+                    FloatBuffer.wrap(floatArrayOf(config.exaggeration)),
+                    longArrayOf(1L)
+                )
 
             val voiceAudio = loadVoiceAudio()
-            val audioTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(voiceAudio), longArrayOf(1L, voiceAudio.size.toLong()))
+            val audioTensor = OnnxTensor.createTensor(
+                env,
+                FloatBuffer.wrap(voiceAudio),
+                longArrayOf(1L, voiceAudio.size.toLong())
+            )
             val speechRes = speechEncoderModel.run(mapOf("audio_values" to audioTensor))
             val condEmb = try {
                 val cond = cloneTensor(speechRes[0] as OnnxTensor)
@@ -109,7 +122,8 @@ class ChatterboxTtsExecutor(
                 val mask = attentionMask ?: throw IllegalStateException("Missing attention mask")
                 val kv = pastKeyValues ?: throw IllegalStateException("Missing kv cache")
 
-                val attentionMaskTensor = createLongTensor(env, mask, longArrayOf(1L, mask.size.toLong()))
+                val attentionMaskTensor =
+                    createLongTensor(env, mask, longArrayOf(1L, mask.size.toLong()))
                 val lmInputs = LinkedHashMap<String, OnnxTensor>()
                 lmInputs["inputs_embeds"] = lmEmbeds
                 lmInputs["attention_mask"] = attentionMaskTensor
@@ -135,8 +149,10 @@ class ChatterboxTtsExecutor(
 
                     embedInputs.remove("input_ids")?.close()
                     embedInputs.remove("position_ids")?.close()
-                    embedInputs["input_ids"] = createLongTensor(env, longArrayOf(next), longArrayOf(1L, 1L))
-                    embedInputs["position_ids"] = createLongTensor(env, longArrayOf((i + 1).toLong()), longArrayOf(1L, 1L))
+                    embedInputs["input_ids"] =
+                        createLongTensor(env, longArrayOf(next), longArrayOf(1L, 1L))
+                    embedInputs["position_ids"] =
+                        createLongTensor(env, longArrayOf((i + 1).toLong()), longArrayOf(1L, 1L))
                     attentionMask = appendOne(mask)
                 } finally {
                     lmRes.close()
@@ -147,9 +163,12 @@ class ChatterboxTtsExecutor(
             condEmb.close()
 
             val promptToken = extractLongArray(promptTokenTensor)
-            val body = if (generateTokens.size > 2) generateTokens.subList(1, generateTokens.size - 1).toLongArray() else LongArray(0)
+            val body =
+                if (generateTokens.size > 2) generateTokens.subList(1, generateTokens.size - 1)
+                    .toLongArray() else LongArray(0)
             val speechTokens = concatLongArrays(promptToken, body)
-            speechTokensTensor = createLongTensor(env, speechTokens, longArrayOf(1L, speechTokens.size.toLong()))
+            speechTokensTensor =
+                createLongTensor(env, speechTokens, longArrayOf(1L, speechTokens.size.toLong()))
 
             val condInputs = mapOf(
                 "speech_tokens" to speechTokensTensor,
@@ -222,6 +241,7 @@ class ChatterboxTtsExecutor(
                 val arr = extractLongArray(tensor)
                 OnnxTensor.createTensor(env, LongBuffer.wrap(arr), shape)
             }
+
             else -> {
                 val arr = extractFloatArray(tensor)
                 OnnxTensor.createTensor(env, FloatBuffer.wrap(arr), shape)
@@ -245,11 +265,13 @@ class ChatterboxTtsExecutor(
                 v.get(out)
                 out
             }
+
             is Array<*> -> {
                 val out = ArrayList<Float>()
                 flattenToFloat(v, out)
                 out.toFloatArray()
             }
+
             else -> FloatArray(0)
         }
     }
@@ -263,11 +285,13 @@ class ChatterboxTtsExecutor(
                 v.get(out)
                 out
             }
+
             is Array<*> -> {
                 val out = ArrayList<Long>()
                 flattenToLong(v, out)
                 out.toLongArray()
             }
+
             else -> LongArray(0)
         }
     }
@@ -328,7 +352,8 @@ class ChatterboxTtsExecutor(
             val idx = token.toInt()
             if (idx < 0 || idx >= adjusted.size) continue
             val score = logits[idx]
-            adjusted[idx] = if (score < 0f) score * REPETITION_PENALTY else score / REPETITION_PENALTY
+            adjusted[idx] =
+                if (score < 0f) score * REPETITION_PENALTY else score / REPETITION_PENALTY
         }
         var maxIdx = 0
         var maxVal = Float.NEGATIVE_INFINITY
